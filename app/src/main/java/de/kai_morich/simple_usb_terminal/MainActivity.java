@@ -24,17 +24,18 @@ import java.net.Socket;
 import java.net.URLDecoder;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity implements FragmentManager.OnBackStackChangedListener {
 
     private static final String TAG = "MainActivity";
     private static final Set<String> ALLOWED_ORIGINS = new HashSet<>();
+    private ServerSocket serverSocket;
 
     static {
         ALLOWED_ORIGINS.add("http://localhost:5173");
@@ -62,11 +63,45 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
             getSupportFragmentManager().beginTransaction().add(R.id.fragment, new DevicesFragment(), "devices").commit();
         else
             onBackStackChanged();
-        new Thread(new HttpServerThread()).start();
+
+        startServer();
+        /*
         Intent serviceIntent = new Intent(this, BackgroundService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent);
+        startService(serviceIntent);
+        */
+    }
+
+    private void startServer() {
+        stopServer(); // Ensure any existing server is stopped before starting a new one
+        new Thread(new HttpServerThread()).start();
+    }
+
+    private void stopServer() {
+        if (serverSocket != null && !serverSocket.isClosed()) {
+            try {
+                serverSocket.close();
+            } catch (IOException e) {
+                Log.e(TAG, "Error closing server socket", e);
+            }
         }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        Log.d(TAG, "onResume called");
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        Log.d(TAG, "onPause called");
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        Log.d(TAG, "onStop called");
     }
 
     @Override
@@ -92,8 +127,10 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
 
     public String obtenerNombreDeDispositivo() {
         String deviceName = "";
+        Log.d(TAG, "Devicename: " + deviceName);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             deviceName = Settings.Global.getString(getContentResolver(), Settings.Global.DEVICE_NAME);
+            Log.d(TAG, "Devicename: " + deviceName);
         }
         if (deviceName == null || deviceName.isEmpty()) {
             deviceName = Build.MODEL;
@@ -101,23 +138,33 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
         if (deviceName == null || deviceName.isEmpty()) {
             deviceName = "Unknown Device";
         }
+        Log.d(TAG, "Devicename after if: " + deviceName);
         return deviceName;
     }
 
     public String obtenerDatosDeBascula() {
         TerminalFragment terminalFragment = (TerminalFragment) getSupportFragmentManager().findFragmentByTag("terminal");
+        Log.d(TAG, "terminal fragment: " + terminalFragment);
         if (terminalFragment != null) {
             String receivedData = terminalFragment.getReceivedData();
+            Log.d(TAG, "ReceiveData: " + receivedData);
             try {
-                double dataValue = Double.parseDouble(receivedData.trim());
-                if (dataValue <= 0) {
-                    return "0.0";
-                } else {
-                    return String.format(Locale.US, "%.1f", dataValue); // Format to one decimal place
-                }
+                // Eliminar cualquier carácter no numérico excepto el punto decimal
+                String dataValue = receivedData.replaceAll("[^0-9.]", "").trim();
+                Log.d(TAG, "Datavalue: " + dataValue);
+
+                // Convertir el valor a un float
+                float floatValue = Float.parseFloat(dataValue);
+                Log.d(TAG, "Float value: " + floatValue);
+
+                // Formatear el float a un decimal con un dígito
+                String formatData = String.format(Locale.US, "%.1f", floatValue);
+                Log.d(TAG, "Format Data: " + formatData);
+
+                return formatData;
             } catch (NumberFormatException e) {
                 Log.e(TAG, "Invalid data received: " + receivedData, e);
-                return "0.0"; // In case receivedData is not a valid number
+                return "0.0"; // En caso de que receivedData no sea un número válido
             }
         } else {
             Log.w(TAG, "No data received from scale");
@@ -129,7 +176,6 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
     private class HttpServerThread implements Runnable {
         @Override
         public void run() {
-            ServerSocket serverSocket;
             try {
                 // Crear un servidor Socket en localhost en el puerto 5001
                 serverSocket = new ServerSocket(5001, 0, InetAddress.getByName("127.0.0.1"));
@@ -293,13 +339,18 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        stopServer(); // Ensure the server is stopped when the activity is destroyed
         // Cerrar el ThreadPoolExecutor al destruir la actividad
         executorService.shutdown();
+        Log.d(TAG, "Enter onDestroy");
         try {
+            Log.d(TAG, "Try");
             if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
                 executorService.shutdownNow();
+                Log.d(TAG, "If");
             }
         } catch (InterruptedException e) {
+            Log.e(TAG, "Error: ", e);
             executorService.shutdownNow();
         }
     }
