@@ -351,6 +351,7 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
             }
         } catch (InterruptedException e) {
             Log.e(TAG, "Error: ", e);
+            // log
             executorService.shutdownNow();
         }
     }
