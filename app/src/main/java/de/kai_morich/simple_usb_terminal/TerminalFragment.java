@@ -316,7 +316,7 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
         try {
             usbSerialPort.open(usbConnection);
             try {
-                usbSerialPort.setParameters(9600, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+                usbSerialPort.setParameters(baudRate, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
             } catch (UnsupportedOperationException e) {
                 status("Setting serial parameters failed: " + e.getMessage());
             }

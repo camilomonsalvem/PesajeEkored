@@ -29,6 +29,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity implements FragmentManager.OnBackStackChangedListener {
 
@@ -63,7 +64,9 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
             onBackStackChanged();
         new Thread(new HttpServerThread()).start();
         Intent serviceIntent = new Intent(this, BackgroundService.class);
-        startService(serviceIntent);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent);
+        }
     }
 
     @Override
@@ -95,6 +98,9 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
         if (deviceName == null || deviceName.isEmpty()) {
             deviceName = Build.MODEL;
         }
+        if (deviceName == null || deviceName.isEmpty()) {
+            deviceName = "Unknown Device";
+        }
         return deviceName;
     }
 
@@ -103,16 +109,18 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
         if (terminalFragment != null) {
             String receivedData = terminalFragment.getReceivedData();
             try {
-                double dataValue = Double.parseDouble(receivedData);
+                double dataValue = Double.parseDouble(receivedData.trim());
                 if (dataValue <= 0) {
-                    return "0";
+                    return "0.0";
                 } else {
-                    return receivedData;
+                    return String.format(Locale.US, "%.1f", dataValue); // Format to one decimal place
                 }
             } catch (NumberFormatException e) {
-                return "0"; // En caso de que receivedData no sea un número válido
+                Log.e(TAG, "Invalid data received: " + receivedData, e);
+                return "0.0"; // In case receivedData is not a valid number
             }
         } else {
+            Log.w(TAG, "No data received from scale");
             return "No data received";
         }
     }
