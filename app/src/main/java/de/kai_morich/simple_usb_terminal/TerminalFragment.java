@@ -70,6 +70,8 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
     private boolean pendingNewline = false;
     private String newline = TextUtil.newline_crlf;
 
+    private String receivedData = ""; // Variable para almacenar los datos recibidos
+
     public TerminalFragment() {
         broadcastReceiver = new BroadcastReceiver() {
             @Override
@@ -314,7 +316,7 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
         try {
             usbSerialPort.open(usbConnection);
             try {
-                usbSerialPort.setParameters(baudRate, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+                usbSerialPort.setParameters(9600, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
             } catch (UnsupportedOperationException e) {
                 status("Setting serial parameters failed: " + e.getMessage());
             }
@@ -366,17 +368,18 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
 
     private void receive(ArrayDeque<byte[]> datas) {
         SpannableStringBuilder spn = new SpannableStringBuilder();
+        StringBuilder receivedBuilder = new StringBuilder(); // Para construir la cadena recibida
         for (byte[] data : datas) {
             if (hexEnabled) {
-                spn.append(TextUtil.toHexString(data)).append('\n');
+                String hexString = TextUtil.toHexString(data);
+                spn.append(hexString).append('\n');
+                receivedBuilder.append(hexString).append('\n');
             } else {
                 String msg = new String(data);
                 if (newline.equals(TextUtil.newline_crlf) && msg.length() > 0) {
-                    // don't show CR as ^M if directly before LF
                     msg = msg.replace(TextUtil.newline_crlf, TextUtil.newline_lf);
-                    // special handling if CR and LF come in separate fragments
                     if (pendingNewline && msg.charAt(0) == '\n') {
-                        if(spn.length() >= 2) {
+                        if (spn.length() >= 2) {
                             spn.delete(spn.length() - 2, spn.length());
                         } else {
                             Editable edt = receiveText.getEditableText();
@@ -387,9 +390,15 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
                     pendingNewline = msg.charAt(msg.length() - 1) == '\r';
                 }
                 spn.append(TextUtil.toCaretString(msg, newline.length() != 0));
+                receivedBuilder.append(msg); // Agregar mensaje recibido al builder
             }
         }
         receiveText.append(spn);
+        receivedData = receivedBuilder.toString(); // Actualizar la variable receivedData
+    }
+
+    public String getReceivedData() {
+        return receivedData;
     }
 
     void status(String str) {
