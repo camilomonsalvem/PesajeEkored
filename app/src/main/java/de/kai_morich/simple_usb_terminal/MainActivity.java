@@ -24,10 +24,10 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
     private final ActivityResultLauncher<String> requestPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
                 if (isGranted) {
-                    // Permiso concedido, iniciar el servicio
+                    // Permission granted, start the service
                     ForegroundService.startService(this);
                 } else {
-                    // Permiso no concedido, manejar la situación según sea necesario
+                    // Permission not granted, handle as necessary
                 }
             });
 
@@ -48,7 +48,9 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
 
         // Request permission for the foreground service
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            requestPermissionLauncher.launch(Manifest.permission.FOREGROUND_SERVICE);
+            requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
+        } else {
+            ForegroundService.startService(this);
         }
 
         // Handle button clicks to start and stop the service
@@ -84,10 +86,8 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
 
     public String obtenerNombreDeDispositivo() {
         String deviceName = "";
-        Log.d(TAG, "Devicename: " + deviceName);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             deviceName = Settings.Global.getString(getContentResolver(), Settings.Global.DEVICE_NAME);
-            Log.d(TAG, "Devicename: " + deviceName);
         }
         if (deviceName == null || deviceName.isEmpty()) {
             deviceName = Build.MODEL;
@@ -95,7 +95,6 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
         if (deviceName == null || deviceName.isEmpty()) {
             deviceName = "Unknown Device";
         }
-        Log.d(TAG, "Devicename after if: " + deviceName);
         return deviceName;
     }
 }

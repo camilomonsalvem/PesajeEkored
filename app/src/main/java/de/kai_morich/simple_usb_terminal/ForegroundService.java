@@ -10,7 +10,6 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import androidx.core.app.NotificationCompat;
-
 import android.provider.Settings;
 import android.util.Log;
 import androidx.fragment.app.FragmentManager;
@@ -54,17 +53,12 @@ public class ForegroundService extends Service {
         super.onDestroy();
         isStarted = false;
         stopServer(); // Ensure the server is stopped when the activity is destroyed
-        // Cerrar el ThreadPoolExecutor al destruir la actividad
         executorService.shutdown();
-        Log.d(TAG, "Enter onDestroy");
         try {
-            Log.d(TAG, "Try");
             if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
                 executorService.shutdownNow();
-                Log.d(TAG, "If");
             }
         } catch (InterruptedException e) {
-            Log.e(TAG, "Error: ", e);
             executorService.shutdownNow();
         }
         handler.removeCallbacks(updateNotificationTask); // Detener la actualización de la notificación
@@ -89,7 +83,7 @@ public class ForegroundService extends Service {
         createServiceNotificationChannel();
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Foreground Service")
-                .setContentText("Peso: " + "data")
+                .setContentText("Peso: " + data)
                 .setSmallIcon(R.drawable.ic_notification)
                 .build();
         startForeground(ONGOING_NOTIFICATION_ID, notification);
@@ -177,10 +171,8 @@ public class ForegroundService extends Service {
 
     public String obtenerNombreDeDispositivo() {
         String deviceName = "";
-        Log.d(TAG, "Devicename: " + deviceName);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             deviceName = Settings.Global.getString(getContentResolver(), Settings.Global.DEVICE_NAME);
-            Log.d(TAG, "Devicename: " + deviceName);
         }
         if (deviceName == null || deviceName.isEmpty()) {
             deviceName = Build.MODEL;
@@ -188,36 +180,27 @@ public class ForegroundService extends Service {
         if (deviceName == null || deviceName.isEmpty()) {
             deviceName = "Unknown Device";
         }
-        Log.d(TAG, "Devicename after if: " + deviceName);
         return deviceName;
     }
 
     public String obtenerDatosDeBascula() {
         FragmentManager fragmentManager = FragmentManagerSingleton.getInstance().getFragmentManager();
-        Log.d(TAG, "terminal fragment: " + fragmentManager);
         if (fragmentManager != null) {
             TerminalFragment terminalFragment = (TerminalFragment) fragmentManager.findFragmentByTag("terminal");
             if (terminalFragment != null) {
                 String receivedData = terminalFragment.getReceivedData();
-                Log.d(TAG, "ReceiveData: " + receivedData);
                 try {
                     String dataValue = receivedData.replaceAll("[^0-9.]", "").trim();
-                    Log.d(TAG, "Datavalue: " + dataValue);
                     float floatValue = Float.parseFloat(dataValue);
-                    Log.d(TAG, "Float value: " + floatValue);
-                    String formatData = String.format(Locale.US, "%.1f", floatValue);
-                    Log.d(TAG, "Format Data: " + formatData);
-                    return formatData;
+                    return String.format(Locale.US, "%.1f", floatValue);
                 } catch (NumberFormatException e) {
                     Log.e(TAG, "Invalid data received: " + receivedData, e);
                     return "0.0";
                 }
             } else {
-                Log.w(TAG, "No data received from scale");
                 return "No data received";
             }
         } else {
-            Log.e(TAG, "El FragmentManager no se inicializó correctamente.");
             return "Error: FragmentManager not initialized";
         }
     }
@@ -227,7 +210,6 @@ public class ForegroundService extends Service {
         public void run() {
             try {
                 serverSocket = new ServerSocket(5001, 0, InetAddress.getByName("localhost"));
-                Log.i(TAG, "Server started on port 5001");
                 while (!Thread.currentThread().isInterrupted()) {
                     Socket socket = serverSocket.accept();
                     executorService.submit(new HttpRequestHandler(socket));
@@ -255,7 +237,6 @@ public class ForegroundService extends Service {
                 if (requestLine == null || requestLine.isEmpty()) {
                     return;
                 }
-                Log.d(TAG, "Request Line: " + requestLine);
 
                 Map<String, String> headers = new HashMap<>();
                 String line;
@@ -330,6 +311,7 @@ public class ForegroundService extends Service {
             );
             outputStream.write(httpResponse.getBytes());
             outputStream.flush();
+
         }
     }
 }

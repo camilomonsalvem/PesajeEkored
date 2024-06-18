@@ -49,8 +49,6 @@ import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.EnumSet;
 
-import android.util.Log;
-
 public class TerminalFragment extends Fragment implements ServiceConnection, SerialListener {
 
     private enum Connected { False, Pending, True }
@@ -71,8 +69,6 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
     private boolean controlLinesEnabled = false;
     private boolean pendingNewline = false;
     private String newline = TextUtil.newline_crlf;
-
-    private static final String TAG = "";
 
     private String receivedData = ""; // Variable para almacenar los datos recibidos
 
@@ -131,7 +127,7 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
     @Override
     public void onAttach(@NonNull Activity activity) {
         super.onAttach(activity);
-        getActivity().bindService(new Intent(getActivity(), SerialService.class), (ServiceConnection) this, Context.BIND_AUTO_CREATE);
+        getActivity().bindService(new Intent(getActivity(), SerialService.class), this, Context.BIND_AUTO_CREATE);
     }
 
     @Override
@@ -400,7 +396,6 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
     }
 
     public String getReceivedData() {
-        Log.d(TAG, "getReceivedData: " + receivedData);
         return receivedData;
     }
 
