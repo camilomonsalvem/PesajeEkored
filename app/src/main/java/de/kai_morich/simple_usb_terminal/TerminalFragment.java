@@ -72,7 +72,7 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
     private boolean pendingNewline = false;
     private String newline = TextUtil.newline_crlf;
 
-    private static final String TAG = "";
+    private static final String TAG = "DEBUG";
 
     private String receivedData = ""; // Variable para almacenar los datos recibidos
 
