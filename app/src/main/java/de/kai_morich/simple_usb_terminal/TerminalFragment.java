@@ -49,6 +49,8 @@ import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.EnumSet;
 
+import android.util.Log;
+
 public class TerminalFragment extends Fragment implements ServiceConnection, SerialListener {
 
     private enum Connected { False, Pending, True }
@@ -69,6 +71,8 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
     private boolean controlLinesEnabled = false;
     private boolean pendingNewline = false;
     private String newline = TextUtil.newline_crlf;
+
+    private static final String TAG = "";
 
     private String receivedData = ""; // Variable para almacenar los datos recibidos
 
@@ -127,7 +131,7 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
     @Override
     public void onAttach(@NonNull Activity activity) {
         super.onAttach(activity);
-        getActivity().bindService(new Intent(getActivity(), SerialService.class), this, Context.BIND_AUTO_CREATE);
+        getActivity().bindService(new Intent(getActivity(), SerialService.class), (ServiceConnection) this, Context.BIND_AUTO_CREATE);
     }
 
     @Override
@@ -322,8 +326,6 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
             }
             SerialSocket socket = new SerialSocket(getActivity().getApplicationContext(), usbConnection, usbSerialPort);
             service.connect(socket);
-            // usb connect is not asynchronous. connect-success and connect-error are returned immediately from socket.connect
-            // for consistency to bluetooth/bluetooth-LE app use same SerialListener and SerialService classes
             onSerialConnect();
         } catch (Exception e) {
             onSerialConnectError(e);
@@ -368,7 +370,7 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
 
     private void receive(ArrayDeque<byte[]> datas) {
         SpannableStringBuilder spn = new SpannableStringBuilder();
-        StringBuilder receivedBuilder = new StringBuilder(); // Para construir la cadena recibida
+        StringBuilder receivedBuilder = new StringBuilder();
         for (byte[] data : datas) {
             if (hexEnabled) {
                 String hexString = TextUtil.toHexString(data);
@@ -390,14 +392,15 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
                     pendingNewline = msg.charAt(msg.length() - 1) == '\r';
                 }
                 spn.append(TextUtil.toCaretString(msg, newline.length() != 0));
-                receivedBuilder.append(msg); // Agregar mensaje recibido al builder
+                receivedBuilder.append(msg);
             }
         }
         receiveText.append(spn);
-        receivedData = receivedBuilder.toString(); // Actualizar la variable receivedData
+        receivedData = receivedBuilder.toString();
     }
 
     public String getReceivedData() {
+        Log.d(TAG, "getReceivedData: " + receivedData);
         return receivedData;
     }
 
@@ -417,7 +420,6 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
         intent.putExtra("android.provider.extra.APP_PACKAGE", getActivity().getPackageName());
         startActivity(intent);
     }
-
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
@@ -461,7 +463,7 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
     }
 
     class ControlLines {
-        private static final int refreshInterval = 200; // msec
+        private static final int refreshInterval = 200;
 
         private final Handler mainLooper;
         private final Runnable runnable;
@@ -470,7 +472,7 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
 
         ControlLines(View view) {
             mainLooper = new Handler(Looper.getMainLooper());
-            runnable = this::run; // w/o explicit Runnable, a new lambda would be created on each postDelayed, which would not be found again by removeCallbacks
+            runnable = this::run;
 
             frame = view.findViewById(R.id.controlLines);
             rtsBtn = view.findViewById(R.id.controlLineRts);
@@ -545,5 +547,4 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
             riBtn.setChecked(false);
         }
     }
-
 }

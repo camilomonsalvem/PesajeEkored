@@ -2,7 +2,6 @@ package de.kai_morich.simple_usb_terminal;
 
 import android.content.Intent;
 import android.os.Bundle;
-
 import android.os.Build;
 import androidx.activity.EdgeToEdge;
 import androidx.activity.result.ActivityResultLauncher;
@@ -10,12 +9,11 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 import androidx.fragment.app.FragmentManager;
-
+import android.Manifest;
+import android.provider.Settings;
+import android.util.Log;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-
-import android.Manifest;
-
 
 public class MainActivity extends AppCompatActivity implements FragmentManager.OnBackStackChangedListener {
 
@@ -33,37 +31,6 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
                 }
             });
 
-    /*
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        EdgeToEdge.enable(this);
-        setContentView(R.layout.activity_main);
-        Toolbar toolbar = findViewById(R.id.toolbar);
-        setSupportActionBar(toolbar);
-        getSupportFragmentManager().addOnBackStackChangedListener(this);
-        if (savedInstanceState == null)
-            getSupportFragmentManager().beginTransaction().add(R.id.fragment, new DevicesFragment(), "devices").commit();
-        else
-            onBackStackChanged();
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            requestPermissionLauncher.launch(Manifest.permission.FOREGROUND_SERVICE);
-        }
-        setContentView(R.layout.activity_main);
-
-        // Manejar los clics de los botones para iniciar y detener el servicio
-        findViewById(R.id.start_button).setOnClickListener(v -> {
-            ForegroundService.startService(this);
-        });
-
-        findViewById(R.id.stop_button).setOnClickListener(v -> {
-            ForegroundService.stopService(this);
-        });
-    }
-
-
-     */
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -114,5 +81,21 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
         }
         super.onNewIntent(intent);
     }
-}
 
+    public String obtenerNombreDeDispositivo() {
+        String deviceName = "";
+        Log.d(TAG, "Devicename: " + deviceName);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            deviceName = Settings.Global.getString(getContentResolver(), Settings.Global.DEVICE_NAME);
+            Log.d(TAG, "Devicename: " + deviceName);
+        }
+        if (deviceName == null || deviceName.isEmpty()) {
+            deviceName = Build.MODEL;
+        }
+        if (deviceName == null || deviceName.isEmpty()) {
+            deviceName = "Unknown Device";
+        }
+        Log.d(TAG, "Devicename after if: " + deviceName);
+        return deviceName;
+    }
+}

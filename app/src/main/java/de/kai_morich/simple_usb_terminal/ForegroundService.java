@@ -7,36 +7,23 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
-
 import androidx.core.app.NotificationCompat;
 
-import android.annotation.SuppressLint;
-import android.content.IntentFilter;
-import android.os.Build;
-import android.os.Bundle;
 import android.provider.Settings;
 import android.util.Log;
-import android.widget.TextView;
-
-import androidx.activity.EdgeToEdge;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.graphics.Insets;
-import androidx.core.view.ViewCompat;
-import androidx.core.view.WindowInsetsCompat;
 import androidx.fragment.app.FragmentManager;
-
 import org.json.JSONException;
 import org.json.JSONObject;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.InetAddress;
 import java.net.URLDecoder;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -47,12 +34,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-
 public class ForegroundService extends Service {
 
     private static final String TAG = "MainActivity";
     private NotificationManager notificationManager;
     private boolean isStarted = false;
+    private final Handler handler = new Handler();
+    private final int updateInterval = 1000; // Intervalo en milisegundos para actualizar la notificación
 
     @Override
     public void onCreate() {
@@ -77,41 +65,33 @@ public class ForegroundService extends Service {
             }
         } catch (InterruptedException e) {
             Log.e(TAG, "Error: ", e);
-            // log-
             executorService.shutdownNow();
         }
+        handler.removeCallbacks(updateNotificationTask); // Detener la actualización de la notificación
     }
 
-    //NOS INDICA SI ESTA INTERACTUANDO CON OTRO COMPONENTE
     @Override
     public IBinder onBind(Intent intent) {
         throw new UnsupportedOperationException("Not yet implemented");
     }
 
-    //ACTIVACION DEL SERVICIO
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (!isStarted) {
-            makeForeground();
+            makeForeground(obtenerDatosDeBascula());
             isStarted = true;
         }
-        //DEPENDIENDO DE LO QUE RETORNE HACE QUE CAMBIE LA DETENCION DE LA APLICACION
+        handler.post(updateNotificationTask);
         return START_STICKY;
     }
 
-    private void makeForeground() {
+    private void makeForeground(String data) {
         createServiceNotificationChannel();
-
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                //TITULO
                 .setContentTitle("Foreground Service")
-                //CONTENIDO
-                .setContentText("Peso: " + obtenerDatosDeBascula())
-                //ICONO
+                .setContentText("Peso: " + "data")
                 .setSmallIcon(R.drawable.ic_notification)
-                //CREACION DE LA NOTIFICACION
                 .build();
-
         startForeground(ONGOING_NOTIFICATION_ID, notification);
     }
 
@@ -119,15 +99,32 @@ public class ForegroundService extends Service {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             return;
         }
-
         NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
                 "Foreground Service Channel",
                 NotificationManager.IMPORTANCE_DEFAULT
         );
-
         notificationManager.createNotificationChannel(channel);
     }
+
+    private void updateNotification(String weightData) {
+        Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("Foreground Service")
+                .setContentText("Peso: " + weightData)
+                .setSmallIcon(R.drawable.ic_notification)
+                .build();
+        notificationManager.notify(ONGOING_NOTIFICATION_ID, notification);
+    }
+
+    private final Runnable updateNotificationTask = new Runnable() {
+        @Override
+        public void run() {
+            String weightData = obtenerDatosDeBascula();
+            Log.d(TAG, "weightData: " + weightData);
+            updateNotification(weightData);
+            handler.postDelayed(this, updateInterval);
+        }
+    };
 
     public static final int ONGOING_NOTIFICATION_ID = 101;
     public static final String CHANNEL_ID = "1001";
@@ -145,8 +142,6 @@ public class ForegroundService extends Service {
         Intent intent = new Intent(context, ForegroundService.class);
         context.stopService(intent);
     }
-
-    //---------------------------------------------------------------------------------------------------
 
     private static final Set<String> ALLOWED_ORIGINS = new HashSet<>();
     private ServerSocket serverSocket;
@@ -166,7 +161,7 @@ public class ForegroundService extends Service {
     private final ExecutorService executorService = Executors.newFixedThreadPool(4);
 
     private void startServer() {
-        stopServer(); // Ensure any existing server is stopped before starting a new one
+        stopServer();
         new Thread(new HttpServerThread()).start();
     }
 
@@ -197,39 +192,6 @@ public class ForegroundService extends Service {
         return deviceName;
     }
 
-/*
-    public String obtenerDatosDeBascula() {
-        TerminalFragment terminalFragment = (TerminalFragment) getSupportFragmentManager().findFragmentByTag("terminal");
-        Log.d(TAG, "terminal fragment: " + terminalFragment);
-        if (terminalFragment != null) {
-            String receivedData = terminalFragment.getReceivedData();
-            Log.d(TAG, "ReceiveData: " + receivedData);
-            try {
-                // Eliminar cualquier carácter no numérico excepto el punto decimal
-                String dataValue = receivedData.replaceAll("[^0-9.]", "").trim();
-                Log.d(TAG, "Datavalue: " + dataValue);
-
-                // Convertir el valor a un float
-                float floatValue = Float.parseFloat(dataValue);
-                Log.d(TAG, "Float value: " + floatValue);
-
-                // Formatear el float a un decimal con un dígito
-                String formatData = String.format(Locale.US, "%.1f", floatValue);
-                Log.d(TAG, "Format Data: " + formatData);
-
-                return formatData;
-            } catch (NumberFormatException e) {
-                Log.e(TAG, "Invalid data received: " + receivedData, e);
-                return "0.0"; // En caso de que receivedData no sea un número válido
-            }
-        } else {
-            Log.w(TAG, "No data received from scale");
-            return "No data received";
-        }
-    }
- */
-
-    /*
     public String obtenerDatosDeBascula() {
         FragmentManager fragmentManager = FragmentManagerSingleton.getInstance().getFragmentManager();
         Log.d(TAG, "terminal fragment: " + fragmentManager);
@@ -239,22 +201,16 @@ public class ForegroundService extends Service {
                 String receivedData = terminalFragment.getReceivedData();
                 Log.d(TAG, "ReceiveData: " + receivedData);
                 try {
-                    // Eliminar cualquier carácter no numérico excepto el punto decimal
                     String dataValue = receivedData.replaceAll("[^0-9.]", "").trim();
                     Log.d(TAG, "Datavalue: " + dataValue);
-
-                    // Convertir el valor a un float
                     float floatValue = Float.parseFloat(dataValue);
                     Log.d(TAG, "Float value: " + floatValue);
-
-                    // Formatear el float a un decimal con un dígito
                     String formatData = String.format(Locale.US, "%.1f", floatValue);
                     Log.d(TAG, "Format Data: " + formatData);
-
                     return formatData;
                 } catch (NumberFormatException e) {
                     Log.e(TAG, "Invalid data received: " + receivedData, e);
-                    return "0.0"; // En caso de que receivedData no sea un número válido
+                    return "0.0";
                 }
             } else {
                 Log.w(TAG, "No data received from scale");
@@ -266,56 +222,15 @@ public class ForegroundService extends Service {
         }
     }
 
-
-     */
-    public String obtenerDatosDeBascula() {
-        FragmentManager fragmentManager = FragmentManagerSingleton.getInstance().getFragmentManager();
-        Log.d(TAG, "terminal fragment: " + fragmentManager);
-        if (fragmentManager != null) {
-            TerminalFragment terminalFragment = (TerminalFragment) fragmentManager.findFragmentByTag("terminal");
-            if (terminalFragment != null) {
-                String receivedData = terminalFragment.getReceivedData();
-                Log.d(TAG, "ReceiveData: " + receivedData);
-                try {
-                    // Eliminar cualquier carácter no numérico excepto el punto decimal
-                    String dataValue = receivedData.replaceAll("[^0-9.]", "").trim();
-                    Log.d(TAG, "Datavalue: " + dataValue);
-
-                    // Convertir el valor a un float
-                    float floatValue = Float.parseFloat(dataValue);
-                    Log.d(TAG, "Float value: " + floatValue);
-
-                    // Formatear el float a un decimal con un dígito
-                    String formatData = String.format(Locale.US, "%.1f", floatValue);
-                    Log.d(TAG, "Format Data: " + formatData);
-
-                    return formatData;
-                } catch (NumberFormatException e) {
-                    Log.e(TAG, "Invalid data received: " + receivedData, e);
-                    return "0.0"; // En caso de que receivedData no sea un número válido
-                }
-            } else {
-                Log.w(TAG, "No data received from scale");
-                return "No data received";
-            }
-        } else {
-            Log.e(TAG, "El FragmentManager no se inicializó correctamente.");
-            return "Error: FragmentManager not initialized";
-        }
-    }
-
-    // Clase para manejar las solicitudes HTTP en un hilo separado
     private class HttpServerThread implements Runnable {
         @Override
         public void run() {
             try {
-                // Crear un servidor Socket en localhost en el puerto 5001
-                serverSocket = new ServerSocket(5001, 0, InetAddress.getByName("127.0.0.1"));
-                while (true) {
-                    // Esperar a que llegue una solicitud
-                    Socket client = serverSocket.accept();
-                    // Manejar la solicitud utilizando el ThreadPoolExecutor
-                    executorService.submit(new HttpRequestHandler(client));
+                serverSocket = new ServerSocket(5001, 0, InetAddress.getByName("localhost"));
+                Log.i(TAG, "Server started on port 5001");
+                while (!Thread.currentThread().isInterrupted()) {
+                    Socket socket = serverSocket.accept();
+                    executorService.submit(new HttpRequestHandler(socket));
                 }
             } catch (IOException e) {
                 Log.e(TAG, "Error starting server", e);
@@ -323,148 +238,98 @@ public class ForegroundService extends Service {
         }
     }
 
-    // Clase para manejar las solicitudes HTTP
     private class HttpRequestHandler implements Runnable {
-        private final Socket clientSocket;
+        private final Socket socket;
 
         public HttpRequestHandler(Socket socket) {
-            this.clientSocket = socket;
+            this.socket = socket;
         }
 
         @Override
         public void run() {
-            try {
-                // Leer la solicitud del cliente
-                StringBuilder requestBuilder = new StringBuilder();
-                InputStream inputStream = clientSocket.getInputStream();
-                BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+            try (InputStream inputStream = socket.getInputStream();
+                 OutputStream outputStream = socket.getOutputStream();
+                 BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
+
+                String requestLine = reader.readLine();
+                if (requestLine == null || requestLine.isEmpty()) {
+                    return;
+                }
+                Log.d(TAG, "Request Line: " + requestLine);
+
+                Map<String, String> headers = new HashMap<>();
                 String line;
-                while ((line = reader.readLine()) != null && !line.isEmpty()) {
-                    requestBuilder.append(line).append("\r\n");
-                }
-                String request = requestBuilder.toString();
-                Log.d(TAG, "Request: " + request);
-
-                // Obtener el origen de la solicitud
-                String origin = null;
-                for (String header : request.split("\r\n")) {
-                    if (header.startsWith("Origin:")) {
-                        origin = header.split(" ")[1];
-                        break;
+                while (!(line = reader.readLine()).isEmpty()) {
+                    int colonIndex = line.indexOf(":");
+                    if (colonIndex > 0) {
+                        String headerName = line.substring(0, colonIndex).trim();
+                        String headerValue = line.substring(colonIndex + 1).trim();
+                        headers.put(headerName, headerValue);
                     }
                 }
 
-                // Verificar la ruta de la solicitud
-                String[] requestLines = request.split("\n");
-                String[] requestLineParts = requestLines[0].split(" ");
-                if (requestLineParts.length >= 2) {
-                    String method = requestLineParts[0].trim();
-                    String path = requestLineParts[1].trim();
-                    String httpResponse = "";
-
-                    // Extraer parámetros de la URL si es un GET
-                    Map<String, String> queryParams = new HashMap<>();
-                    if ("GET".equals(method) && path.contains("?")) {
-                        String[] pathParts = path.split("\\?");
-                        if (pathParts.length > 1) {
-                            path = pathParts[0];
-                            String queryString = pathParts[1];
-                            String[] queryParamsArray = queryString.split("&");
-                            for (String param : queryParamsArray) {
-                                String[] keyValue = param.split("=");
-                                if (keyValue.length > 1) {
-                                    queryParams.put(keyValue[0], URLDecoder.decode(keyValue[1], "UTF-8"));
-                                }
-                            }
-                        }
-                    }
-
-                    if (origin != null && ALLOWED_ORIGINS.contains(origin.trim())) {
-                        if ("OPTIONS".equals(method)) {
-                            // Manejar la solicitud OPTIONS
-                            httpResponse = "HTTP/1.1 204 No Content\r\n"
-                                    + "Access-Control-Allow-Origin: " + origin + "\r\n"
-                                    + "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
-                                    + "Access-Control-Allow-Headers: Content-Type\r\n"
-                                    + "\r\n";
-                        } else if ("/leer-peso".equals(path) || "/leer-peso/".equals(path)) {
-                            // Crear un JSON con los datos de la báscula
-                            JSONObject jsonResponse = new JSONObject();
-                            try {
-                                jsonResponse.put("weight", obtenerDatosDeBascula());
-                            } catch (JSONException e) {
-                                Log.e(TAG, "JSON error", e);
-                            }
-
-                            // Construir la respuesta con encabezados CORS
-                            httpResponse = "HTTP/1.1 200 OK\r\n"
-                                    + "Content-Type: application/json\r\n"
-                                    + "Access-Control-Allow-Origin: " + origin + "\r\n"
-                                    + "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
-                                    + "Access-Control-Allow-Headers: Content-Type\r\n"
-                                    + "\r\n"
-                                    + jsonResponse.toString();
-                        } else if ("/device-name".equals(path) || "/device-name/".equals(path)) {
-                            // Crear un JSON con el nombre del dispositivo
-                            JSONObject jsonResponse = new JSONObject();
-                            try {
-                                jsonResponse.put("device_name", obtenerNombreDeDispositivo());
-                            } catch (JSONException e) {
-                                Log.e(TAG, "JSON error", e);
-                            }
-
-                            // Construir la respuesta con encabezados CORS
-                            httpResponse = "HTTP/1.1 200 OK\r\n"
-                                    + "Content-Type: application/json\r\n"
-                                    + "Access-Control-Allow-Origin: " + origin + "\r\n"
-                                    + "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
-                                    + "Access-Control-Allow-Headers: Content-Type\r\n"
-                                    + "\r\n"
-                                    + jsonResponse.toString();
-                        } else {
-                            // Ruta no encontrada, enviar respuesta 404 Not Found con encabezados CORS
-                            httpResponse = "HTTP/1.1 404 Not Found\r\n"
-                                    + "Access-Control-Allow-Origin: " + origin + "\r\n"
-                                    + "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
-                                    + "Access-Control-Allow-Headers: Content-Type\r\n"
-                                    + "Content-Length: 0\r\n"
-                                    + "\r\n";
-                        }
-                    } else {
-                        // Origen no permitido
-                        httpResponse = "HTTP/1.1 403 Forbidden\r\n"
-                                + "Content-Type: text/plain\r\n"
-                                + "Access-Control-Allow-Origin: *\r\n"
-                                + "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
-                                + "Access-Control-Allow-Headers: Content-Type\r\n"
-                                + "\r\n"
-                                + "Forbidden: CORS policy does not allow access from this origin.";
-                    }
-
-                    // Enviar la respuesta al cliente
-                    OutputStream outputStream = clientSocket.getOutputStream();
-                    outputStream.write(httpResponse.getBytes("UTF-8"));
-                    outputStream.flush();
-                    clientSocket.close();
+                String origin = headers.get("Origin");
+                if (origin == null || !ALLOWED_ORIGINS.contains(origin)) {
+                    sendResponse(outputStream, 403, "Forbidden", "text/plain");
+                    return;
                 }
+
+                String[] requestParts = requestLine.split(" ");
+                if (requestParts.length < 2) {
+                    return;
+                }
+
+                String path = URLDecoder.decode(requestParts[1], "UTF-8");
+                String[] pathParts = path.split("/");
+                String endpoint = pathParts.length > 1 ? pathParts[1] : "";
+
+                if ("device-name".equals(endpoint)) {
+                    String deviceName = obtenerNombreDeDispositivo();
+                    JSONObject jsonResponse = new JSONObject();
+                    try {
+                        jsonResponse.put("device_name", deviceName);
+                    } catch (JSONException e) {
+                        Log.e(TAG, "Error creating JSON response", e);
+                    }
+                    sendResponse(outputStream, 200, jsonResponse.toString(), "application/json");
+                } else if ("leer-peso".equals(endpoint)) {
+                    String data = obtenerDatosDeBascula();
+                    JSONObject jsonResponse = new JSONObject();
+                    try {
+                        jsonResponse.put("weight", data);
+                    } catch (JSONException e) {
+                        Log.e(TAG, "Error creating JSON response", e);
+                    }
+                    sendResponse(outputStream, 200, jsonResponse.toString(), "application/json");
+                } else {
+                    sendResponse(outputStream, 404, "Not Found", "text/plain");
+                }
+
             } catch (IOException e) {
                 Log.e(TAG, "Error handling request", e);
+            } finally {
                 try {
-                    String httpResponse = "HTTP/1.1 500 Internal Server Error\r\n"
-                            + "Content-Type: text/plain\r\n"
-                            + "Access-Control-Allow-Origin: *\r\n"
-                            + "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
-                            + "Access-Control-Allow-Headers: Content-Type\r\n"
-                            + "\r\n"
-                            + "Error handling request: " + e.getMessage();
-                    OutputStream outputStream = clientSocket.getOutputStream();
-                    outputStream.write(httpResponse.getBytes("UTF-8"));
-                    outputStream.flush();
-                    clientSocket.close();
-                } catch (IOException ex) {
-                    Log.e(TAG, "Error sending error response", ex);
+                    socket.close();
+                } catch (IOException e) {
+                    Log.e(TAG, "Error closing socket", e);
                 }
             }
+        }
+
+        private void sendResponse(OutputStream outputStream, int statusCode, String response, String contentType) throws IOException {
+            String statusMessage = statusCode == 200 ? "OK" : statusCode == 403 ? "Forbidden" : "Not Found";
+            String httpResponse = String.format(
+                    "HTTP/1.1 %d %s\r\n" +
+                            "Content-Type: %s\r\n" +
+                            "Content-Length: %d\r\n" +
+                            "Access-Control-Allow-Origin: *\r\n" +
+                            "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
+                            "Access-Control-Allow-Headers: Origin, Content-Type, X-Auth-Token\r\n" +
+                            "\r\n%s",
+                    statusCode, statusMessage, contentType, response.length(), response
+            );
+            outputStream.write(httpResponse.getBytes());
+            outputStream.flush();
         }
     }
 }
