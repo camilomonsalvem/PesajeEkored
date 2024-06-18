@@ -105,7 +105,7 @@ public class ForegroundService extends Service {
         createServiceNotificationChannel();
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Aplicación Pesaje Ekored")
-                .setContentText("La aplicación se encuentra en ejecución...")
+                .setContentText("La aplicación se esta ejecutando...")
                 .setSmallIcon(R.drawable.ic_notification)
                 .build();
         startForeground(ONGOING_NOTIFICATION_ID, notification);
@@ -126,7 +126,7 @@ public class ForegroundService extends Service {
     private void updateNotification(String weightData) {
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Aplicación Pesaje Ekored")
-                .setContentText("La aplicación se encuentra en ejecución...")
+                .setContentText("La aplicación se esta ejecutando...")
                 .setSmallIcon(R.drawable.ic_notification)
                 .build();
         notificationManager.notify(ONGOING_NOTIFICATION_ID, notification);
