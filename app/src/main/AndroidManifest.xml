@@ -37,10 +37,13 @@
                 android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
                 android:resource="@xml/usb_device_filter" />
         </activity>
-        <service android:name=".BackgroundService" />
         <service
             android:name=".SerialService"
             android:foregroundServiceType="remoteMessaging|connectedDevice"
+            android:exported="false" />
+        <service
+            android:name=".ForegroundService"
+            android:foregroundServiceType="connectedDevice"
             android:exported="false" />
     </application>
 
