@@ -12,7 +12,8 @@ import androidx.annotation.ColorInt;
 
 import java.io.ByteArrayOutputStream;
 
-final class TextUtil {
+final class
+TextUtil {
 
     @ColorInt static int caretBackground = 0xff666666;
 

@@ -51,6 +51,7 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
             requestPermissionLauncher.launch(Manifest.permission.FOREGROUND_SERVICE);
         }
 
+        /*
         // Handle button clicks to start and stop the service
         findViewById(R.id.start_button).setOnClickListener(v -> {
             ForegroundService.startService(this);
@@ -59,6 +60,8 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
         findViewById(R.id.stop_button).setOnClickListener(v -> {
             ForegroundService.stopService(this);
         });
+
+         */
     }
 
     @Override

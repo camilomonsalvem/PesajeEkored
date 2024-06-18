@@ -26,20 +26,4 @@
         android:background="#656565"
         app:layout_behavior="@string/appbar_scrolling_view_behavior" />
 
-    <Button
-        android:id="@+id/start_button"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Start"
-        app:layout_anchor="@+id/fragment"
-        app:layout_anchorGravity="center" />
-
-    <Button
-        android:id="@+id/stop_button"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Stop"
-        app:layout_anchor="@+id/fragment"
-        app:layout_anchorGravity="end|center" />
-
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

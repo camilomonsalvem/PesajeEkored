@@ -6,6 +6,9 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbDeviceConnection;
+import android.hardware.usb.UsbManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -13,9 +16,14 @@ import androidx.core.app.NotificationCompat;
 
 import android.provider.Settings;
 import android.util.Log;
-import androidx.fragment.app.FragmentManager;
+
+import com.hoho.android.usbserial.driver.UsbSerialDriver;
+import com.hoho.android.usbserial.driver.UsbSerialPort;
+import com.hoho.android.usbserial.driver.UsbSerialProber;
+
 import org.json.JSONException;
 import org.json.JSONObject;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -33,10 +41,15 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class ForegroundService extends Service {
 
-    private static final String TAG = "MainActivity";
+    private static final String TAG = "ForegroundService";
+    private UsbSerialPort usbSerialPort;
+    private String receivedData = "";
+    private StringBuilder dataBuffer = new StringBuilder();
     private NotificationManager notificationManager;
     private boolean isStarted = false;
     private final Handler handler = new Handler();
@@ -77,19 +90,22 @@ public class ForegroundService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        connectUsb();
+
         if (!isStarted) {
             makeForeground(obtenerDatosDeBascula());
             isStarted = true;
         }
-        handler.post(updateNotificationTask);
+
+        // handler.post(updateNotificationTask);
         return START_STICKY;
     }
 
     private void makeForeground(String data) {
         createServiceNotificationChannel();
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Foreground Service")
-                .setContentText("Peso: " + "data")
+                .setContentTitle("Aplicación Pesaje Ekored")
+                .setContentText("La aplicación se encuentra en ejecución...")
                 .setSmallIcon(R.drawable.ic_notification)
                 .build();
         startForeground(ONGOING_NOTIFICATION_ID, notification);
@@ -109,8 +125,8 @@ public class ForegroundService extends Service {
 
     private void updateNotification(String weightData) {
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Foreground Service")
-                .setContentText("Peso: " + weightData)
+                .setContentTitle("Aplicación Pesaje Ekored")
+                .setContentText("La aplicación se encuentra en ejecución...")
                 .setSmallIcon(R.drawable.ic_notification)
                 .build();
         notificationManager.notify(ONGOING_NOTIFICATION_ID, notification);
@@ -136,6 +152,94 @@ public class ForegroundService extends Service {
         } else {
             context.startForegroundService(intent);
         }
+    }
+
+    private void connectUsb() {
+        UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
+        UsbDevice device = null;
+
+        // Obtener el dispositivo USB
+        for (UsbDevice v : usbManager.getDeviceList().values()) {
+            device = v;
+            break;  // Usa el primer dispositivo USB encontrado
+        }
+
+        if (device == null) {
+            Log.e(TAG, "No USB device found");
+            return;
+        }
+
+        UsbSerialDriver driver = UsbSerialProber.getDefaultProber().probeDevice(device);
+        if (driver == null || driver.getPorts().isEmpty()) {
+            Log.e(TAG, "No USB driver or ports found for the device");
+            return;
+        }
+
+        usbSerialPort = driver.getPorts().get(0);
+        UsbDeviceConnection usbConnection = usbManager.openDevice(driver.getDevice());
+        if (usbConnection == null) {
+            Log.e(TAG, "Opening USB connection failed");
+            return;
+        }
+
+        try {
+            usbSerialPort.open(usbConnection);
+            usbSerialPort.setParameters(9600, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+        } catch (IOException e) {
+            Log.e(TAG, "Error setting up USB connection", e);
+            return;
+        }
+
+        // Start reading data from the USB device
+        startReadingUsbData();
+    }
+
+    private void startReadingUsbData() {
+        new Thread(() -> {
+            byte[] buffer = new byte[64];
+            while (true) {
+                try {
+                    int numBytesRead = usbSerialPort.read(buffer, 1000);
+                    if (numBytesRead > 0) {
+                        String data = new String(buffer, 0, numBytesRead);
+                        Log.d(TAG, "numBytesRead: " + numBytesRead);
+                        Log.d(TAG, "Received data: " + data);
+                        dataBuffer.append(data);
+
+                        // Process buffer and extract weight data
+                        processBuffer();
+                    }
+                } catch (IOException e) {
+                    Log.e(TAG, "Error reading from USB", e);
+                    break;
+                }
+            }
+        }).start();
+    }
+
+    private void processBuffer() {
+        // Assuming the weight data is always in the format "XXXX.X"
+        Pattern pattern = Pattern.compile("\\d{4}\\.\\d");
+        Matcher matcher = pattern.matcher(dataBuffer);
+        if (matcher.find()) {
+            receivedData = matcher.group();
+            // Clear the buffer up to the end of the matched data
+            dataBuffer.delete(0, matcher.end());
+            Log.d(TAG, "Processed weight data: " + receivedData);
+        }
+    }
+
+    public String obtenerDatosDeBascula() {
+        if (receivedData.isEmpty()) {
+            return "0.0";
+        }
+        // Eliminar ceros a la izquierda
+        String formattedData = receivedData.replaceFirst("^0+(?!$)", "");
+        // Asegurar que el formato sea correcto si el valor empieza con un punto
+        if (formattedData.startsWith(".")) {
+            formattedData = "0" + formattedData;
+        }
+        return formattedData;
     }
 
     public static void stopService(Context context) {
@@ -190,36 +294,6 @@ public class ForegroundService extends Service {
         }
         Log.d(TAG, "Devicename after if: " + deviceName);
         return deviceName;
-    }
-
-    public String obtenerDatosDeBascula() {
-        FragmentManager fragmentManager = FragmentManagerSingleton.getInstance().getFragmentManager();
-        Log.d(TAG, "terminal fragment: " + fragmentManager);
-        if (fragmentManager != null) {
-            TerminalFragment terminalFragment = (TerminalFragment) fragmentManager.findFragmentByTag("terminal");
-            if (terminalFragment != null) {
-                String receivedData = terminalFragment.getReceivedData();
-                Log.d(TAG, "ReceiveData: " + receivedData);
-                try {
-                    String dataValue = receivedData.replaceAll("[^0-9.]", "").trim();
-                    Log.d(TAG, "Datavalue: " + dataValue);
-                    float floatValue = Float.parseFloat(dataValue);
-                    Log.d(TAG, "Float value: " + floatValue);
-                    String formatData = String.format(Locale.US, "%.1f", floatValue);
-                    Log.d(TAG, "Format Data: " + formatData);
-                    return formatData;
-                } catch (NumberFormatException e) {
-                    Log.e(TAG, "Invalid data received: " + receivedData, e);
-                    return "0.0";
-                }
-            } else {
-                Log.w(TAG, "No data received from scale");
-                return "No data received";
-            }
-        } else {
-            Log.e(TAG, "El FragmentManager no se inicializó correctamente.");
-            return "Error: FragmentManager not initialized";
-        }
     }
 
     private class HttpServerThread implements Runnable {
@@ -330,6 +404,6 @@ public class ForegroundService extends Service {
             );
             outputStream.write(httpResponse.getBytes());
             outputStream.flush();
-        }
-    }
+}
+}
 }
