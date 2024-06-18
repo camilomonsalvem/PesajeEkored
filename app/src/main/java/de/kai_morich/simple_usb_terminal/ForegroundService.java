@@ -55,6 +55,13 @@ public class ForegroundService extends Service {
     private final Handler handler = new Handler();
     private final int updateInterval = 1000; // Intervalo en milisegundos para actualizar la notificación
 
+    // Default connection parameters
+    private int baudRate = 9600;
+    private int dataBits = UsbSerialPort.DATABITS_8;
+    private int stopBits = UsbSerialPort.STOPBITS_1;
+    private int parity = UsbSerialPort.PARITY_NONE;
+    private String command = "W";
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -93,7 +100,7 @@ public class ForegroundService extends Service {
         connectUsb();
 
         if (!isStarted) {
-            makeForeground(obtenerDatosDeBascula());
+            makeForeground();
             isStarted = true;
         }
 
@@ -101,11 +108,11 @@ public class ForegroundService extends Service {
         return START_STICKY;
     }
 
-    private void makeForeground(String data) {
+    private void makeForeground() {
         createServiceNotificationChannel();
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Aplicación Pesaje Ekored")
-                .setContentText("La aplicación se esta ejecutando. Peso: " + obtenerDatosDeBascula())
+                .setContentText("La aplicación se está ejecutando...")
                 .setSmallIcon(R.drawable.ic_notification)
                 .build();
         startForeground(ONGOING_NOTIFICATION_ID, notification);
@@ -126,7 +133,7 @@ public class ForegroundService extends Service {
     private void updateNotification(String weightData) {
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Aplicación Pesaje Ekored")
-                .setContentText("La aplicación se esta ejecutando. Peso: " + weightData)
+                .setContentText("Peso: " + weightData)
                 .setSmallIcon(R.drawable.ic_notification)
                 .build();
         notificationManager.notify(ONGOING_NOTIFICATION_ID, notification);
@@ -184,7 +191,7 @@ public class ForegroundService extends Service {
 
         try {
             usbSerialPort.open(usbConnection);
-            usbSerialPort.setParameters(9600, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+            usbSerialPort.setParameters(baudRate, dataBits, stopBits, parity);
         } catch (IOException e) {
             Log.e(TAG, "Error setting up USB connection", e);
             return;
@@ -197,6 +204,16 @@ public class ForegroundService extends Service {
     private void startReadingUsbData() {
         new Thread(() -> {
             byte[] buffer = new byte[64];
+            /*
+            try {
+                // Enviar el comando antes de leer los datos
+                usbSerialPort.write(command.getBytes(), 1000);
+            } catch (IOException e) {
+                Log.e(TAG, "Error writing command to USB", e);
+            }
+
+             */
+
             while (true) {
                 try {
                     int numBytesRead = usbSerialPort.read(buffer, 1000);
