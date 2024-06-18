@@ -55,12 +55,6 @@ public class ForegroundService extends Service {
     private final Handler handler = new Handler();
     private final int updateInterval = 1000; // Intervalo en milisegundos para actualizar la notificación
 
-    private int baudRate = 9600; // Default values
-    private int dataBits = UsbSerialPort.DATABITS_8;
-    private int stopBits = UsbSerialPort.STOPBITS_1;
-    private int parity = UsbSerialPort.PARITY_NONE;
-    private String command = "W";
-
     @Override
     public void onCreate() {
         super.onCreate();
@@ -190,7 +184,7 @@ public class ForegroundService extends Service {
 
         try {
             usbSerialPort.open(usbConnection);
-            usbSerialPort.setParameters(baudRate, dataBits, stopBits, parity);
+            usbSerialPort.setParameters(9600, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
         } catch (IOException e) {
             Log.e(TAG, "Error setting up USB connection", e);
             return;
@@ -203,13 +197,6 @@ public class ForegroundService extends Service {
     private void startReadingUsbData() {
         new Thread(() -> {
             byte[] buffer = new byte[64];
-            try {
-                // Enviar el comando antes de leer los datos
-                usbSerialPort.write(command.getBytes(), 1000);
-            } catch (IOException e) {
-                Log.e(TAG, "Error writing command to USB", e);
-            }
-
             while (true) {
                 try {
                     int numBytesRead = usbSerialPort.read(buffer, 1000);
@@ -380,14 +367,6 @@ public class ForegroundService extends Service {
                     }
                     sendResponse(outputStream, 200, jsonResponse.toString(), "application/json");
                 } else if ("leer-peso".equals(endpoint)) {
-                    // Parse query parameters for connection settings
-                    Map<String, String> queryParams = getQueryParams(requestParts[1]);
-                    baudRate = Integer.parseInt(queryParams.get("baudRate") != null ? queryParams.get("baudRate") : "9600");
-                    dataBits = Integer.parseInt(queryParams.get("bitDeDato") != null ? queryParams.get("bitDeDato") : "8");
-                    stopBits = Integer.parseInt(queryParams.get("bitDeParada") != null ? queryParams.get("bitDeParada") : "1");
-                    parity = parseParity(queryParams.get("paridad") != null ? queryParams.get("paridad") : "N");
-                    command = queryParams.get("comando") != null ? queryParams.get("comando") : "W";
-
                     String data = obtenerDatosDeBascula();
                     JSONObject jsonResponse = new JSONObject();
                     try {
@@ -411,33 +390,6 @@ public class ForegroundService extends Service {
             }
         }
 
-        private Map<String, String> getQueryParams(String url) {
-            Map<String, String> queryParams = new HashMap<>();
-            String[] urlParts = url.split("\\?");
-            if (urlParts.length > 1) {
-                String[] params = urlParts[1].split("&");
-                for (String param : params) {
-                    String[] keyValue = param.split("=");
-                    if (keyValue.length > 1) {
-                        queryParams.put(keyValue[0], keyValue[1]);
-                    }
-                }
-            }
-            return queryParams;
-        }
-
-        private int parseParity(String parity) {
-            switch (parity) {
-                case "E":
-                    return UsbSerialPort.PARITY_EVEN;
-                case "O":
-                    return UsbSerialPort.PARITY_ODD;
-                case "N":
-                default:
-                    return UsbSerialPort.PARITY_NONE;
-            }
-        }
-
         private void sendResponse(OutputStream outputStream, int statusCode, String response, String contentType) throws IOException {
             String statusMessage = statusCode == 200 ? "OK" : statusCode == 403 ? "Forbidden" : "Not Found";
             String httpResponse = String.format(
@@ -452,6 +404,6 @@ public class ForegroundService extends Service {
             );
             outputStream.write(httpResponse.getBytes());
             outputStream.flush();
-}
-}
+        }
+    }
 }
