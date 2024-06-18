@@ -97,7 +97,7 @@ public class ForegroundService extends Service {
             isStarted = true;
         }
 
-        // handler.post(updateNotificationTask);
+        handler.post(updateNotificationTask);
         return START_STICKY;
     }
 
@@ -105,7 +105,7 @@ public class ForegroundService extends Service {
         createServiceNotificationChannel();
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Aplicación Pesaje Ekored")
-                .setContentText("La aplicación se esta ejecutando...")
+                .setContentText("La aplicación se esta ejecutando. Peso: " + obtenerDatosDeBascula())
                 .setSmallIcon(R.drawable.ic_notification)
                 .build();
         startForeground(ONGOING_NOTIFICATION_ID, notification);
@@ -126,7 +126,7 @@ public class ForegroundService extends Service {
     private void updateNotification(String weightData) {
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Aplicación Pesaje Ekored")
-                .setContentText("La aplicación se esta ejecutando...")
+                .setContentText("La aplicación se esta ejecutando. Peso: " + weightData)
                 .setSmallIcon(R.drawable.ic_notification)
                 .build();
         notificationManager.notify(ONGOING_NOTIFICATION_ID, notification);
