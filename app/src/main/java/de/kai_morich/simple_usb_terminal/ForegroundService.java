@@ -105,7 +105,7 @@ public class ForegroundService extends Service {
         createServiceNotificationChannel();
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Aplicación Pesaje Ekored")
-                .setContentText("La aplicación se esta ejecutando...")
+                .setContentText("La aplicación se está ejecutando...")
                 .setSmallIcon(R.drawable.ic_notification)
                 .build();
         startForeground(ONGOING_NOTIFICATION_ID, notification);
@@ -126,7 +126,7 @@ public class ForegroundService extends Service {
     private void updateNotification(String weightData) {
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Aplicación Pesaje Ekored")
-                .setContentText("La aplicación se esta ejecutando...")
+                .setContentText("La Aplicación se esta ejecutando...")
                 .setSmallIcon(R.drawable.ic_notification)
                 .build();
         notificationManager.notify(ONGOING_NOTIFICATION_ID, notification);
@@ -196,10 +196,11 @@ public class ForegroundService extends Service {
 
     private void startReadingUsbData() {
         new Thread(() -> {
-            byte[] buffer = new byte[64];
+            byte[] buffer = new byte[1028];
             while (true) {
                 try {
                     int numBytesRead = usbSerialPort.read(buffer, 1000);
+
                     if (numBytesRead > 0) {
                         String data = new String(buffer, 0, numBytesRead);
                         Log.d(TAG, "numBytesRead: " + numBytesRead);
@@ -218,14 +219,28 @@ public class ForegroundService extends Service {
     }
 
     private void processBuffer() {
-        // Assuming the weight data is always in the format "XXXX.X"
-        Pattern pattern = Pattern.compile("\\d{4}\\.\\d");
-        Matcher matcher = pattern.matcher(dataBuffer);
-        if (matcher.find()) {
-            receivedData = matcher.group();
-            // Clear the buffer up to the end of the matched data
-            dataBuffer.delete(0, matcher.end());
-            Log.d(TAG, "Processed weight data: " + receivedData);
+        // Unificar el buffer en una sola cadena
+        String completeData = dataBuffer.toString();
+        Log.d(TAG, "Complete data: " + completeData);
+
+        // Regex para capturar el formato XXXX.X
+        Pattern pattern1 = Pattern.compile("=c?\\d{4}\\.\\d");
+        Matcher matcher1 = pattern1.matcher(completeData);
+        if (matcher1.find()) {
+            receivedData = matcher1.group().replace("=", "").replace("c", "");
+            dataBuffer.delete(0, matcher1.end());
+            Log.d(TAG, "Processed weight data (pattern1): " + receivedData);
+            return;
+        }
+
+        // Regex para capturar el formato + XX.Xkg
+        Pattern pattern2 = Pattern.compile("\\+\\s*\\d{1,3}\\.\\dkg");
+        Matcher matcher2 = pattern2.matcher(completeData);
+        if (matcher2.find()) {
+            receivedData = matcher2.group().replace("+", "").replace("kg", "").trim();
+            dataBuffer.delete(0, matcher2.end());
+            Log.d(TAG, "Processed weight data (pattern2): " + receivedData);
+            return;
         }
     }
 
@@ -404,6 +419,6 @@ public class ForegroundService extends Service {
             );
             outputStream.write(httpResponse.getBytes());
             outputStream.flush();
-        }
-    }
+}
+}
 }
