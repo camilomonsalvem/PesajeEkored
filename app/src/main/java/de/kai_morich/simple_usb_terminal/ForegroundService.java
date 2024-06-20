@@ -49,11 +49,27 @@ public class ForegroundService extends Service {
     private static final String TAG = "ForegroundService";
     private UsbSerialPort usbSerialPort;
     private String receivedData = "";
+    private String matchData = "";
     private StringBuilder dataBuffer = new StringBuilder();
     private NotificationManager notificationManager;
     private boolean isStarted = false;
     private final Handler handler = new Handler();
     private final int updateInterval = 1000; // Intervalo en milisegundos para actualizar la notificación
+
+    // Define commands and corresponding patterns
+    private static final Map<String, Pattern[]> COMMAND_PATTERNS = new HashMap<>();
+
+    static {
+        COMMAND_PATTERNS.put("$", new Pattern[]{
+                Pattern.compile("=c?\\d{4}\\.\\d"),         // Pattern 1: =cXXXX.X
+                Pattern.compile("\\+\\s*\\d{1,5}\\.\\dkg"), // Pattern 2: +XXXXX.Xkg (with optional spaces)
+                Pattern.compile("ST,GS,\\+\\d{5}\\.\\dkg")  // Pattern 3: ST,GS,+XXXXX.Xkg
+        });
+        COMMAND_PATTERNS.put("R", new Pattern[]{
+                Pattern.compile("ST,GS,\\+\\d{5}\\.\\dkg")  // Example pattern for command "R"
+        });
+        // Add more commands and patterns as needed
+    }
 
     @Override
     public void onCreate() {
@@ -97,7 +113,7 @@ public class ForegroundService extends Service {
             isStarted = true;
         }
 
-        // handler.post(updateNotificationTask);
+        handler.post(updateNotificationTask);
         return START_STICKY;
     }
 
@@ -105,7 +121,7 @@ public class ForegroundService extends Service {
         createServiceNotificationChannel();
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Aplicación Pesaje Ekored")
-                .setContentText("La aplicación se está ejecutando...")
+                .setContentText("Peso: " + obtenerDatos())
                 .setSmallIcon(R.drawable.ic_notification)
                 .build();
         startForeground(ONGOING_NOTIFICATION_ID, notification);
@@ -126,7 +142,7 @@ public class ForegroundService extends Service {
     private void updateNotification(String weightData) {
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Aplicación Pesaje Ekored")
-                .setContentText("La Aplicación se esta ejecutando...")
+                .setContentText("Peso: " + weightData)
                 .setSmallIcon(R.drawable.ic_notification)
                 .build();
         notificationManager.notify(ONGOING_NOTIFICATION_ID, notification);
@@ -191,16 +207,22 @@ public class ForegroundService extends Service {
         }
 
         // Start reading data from the USB device
-        startReadingUsbData();
+        startReadingUsbData("$"); // Default command, can be changed based on requirement
     }
 
-    private void startReadingUsbData() {
+    private void startReadingUsbData(String command) {
         new Thread(() -> {
             byte[] buffer = new byte[1028];
+            try {
+                // Send command to the scale
+                usbSerialPort.write(command.getBytes(), 1000);
+            } catch (IOException e) {
+                Log.e(TAG, "Error writing command to USB", e);
+            }
+
             while (true) {
                 try {
                     int numBytesRead = usbSerialPort.read(buffer, 1000);
-
                     if (numBytesRead > 0) {
                         String data = new String(buffer, 0, numBytesRead);
                         Log.d(TAG, "numBytesRead: " + numBytesRead);
@@ -208,7 +230,7 @@ public class ForegroundService extends Service {
                         dataBuffer.append(data);
 
                         // Process buffer and extract weight data
-                        processBuffer();
+                        processBuffer(command);
                     }
                 } catch (IOException e) {
                     Log.e(TAG, "Error reading from USB", e);
@@ -218,29 +240,36 @@ public class ForegroundService extends Service {
         }).start();
     }
 
-    private void processBuffer() {
-        // Unificar el buffer en una sola cadena
+    private void processBuffer(String command) {
+        // Unify the buffer into a single string
         String completeData = dataBuffer.toString();
+        matchData = completeData;
         Log.d(TAG, "Complete data: " + completeData);
 
-        // Regex para capturar el formato XXXX.X
-        Pattern pattern1 = Pattern.compile("=c?\\d{4}\\.\\d");
-        Matcher matcher1 = pattern1.matcher(completeData);
-        if (matcher1.find()) {
-            receivedData = matcher1.group().replace("=", "").replace("c", "");
-            dataBuffer.delete(0, matcher1.end());
-            Log.d(TAG, "Processed weight data (pattern1): " + receivedData);
-            return;
-        }
+        // Get patterns for the specific command
+        Pattern[] patterns = COMMAND_PATTERNS.get(command);
 
-        // Regex para capturar el formato + XX.Xkg
-        Pattern pattern2 = Pattern.compile("\\+\\s*\\d{1,3}\\.\\dkg");
-        Matcher matcher2 = pattern2.matcher(completeData);
-        if (matcher2.find()) {
-            receivedData = matcher2.group().replace("+", "").replace("kg", "").trim();
-            dataBuffer.delete(0, matcher2.end());
-            Log.d(TAG, "Processed weight data (pattern2): " + receivedData);
-            return;
+        if (patterns != null) {
+            for (Pattern pattern : patterns) {
+                Matcher matcher = pattern.matcher(completeData);
+                if (matcher.find()) {
+                    String matchedData = matcher.group();
+                    Log.d(TAG, "Matched data: " + matchedData);
+
+                    // Normalize matched data
+                    receivedData = matchedData
+                            .replace("=", "")
+                            .replace("c", "")
+                            .replace("+", "")
+                            .replace("kg", "")
+                            .replace("ST,GS,", "")
+                            .trim();
+
+                    dataBuffer.delete(0, matcher.end());
+                    Log.d(TAG, "Processed weight data: " + receivedData);
+                    return;
+                }
+            }
         }
     }
 
@@ -255,6 +284,10 @@ public class ForegroundService extends Service {
             formattedData = "0" + formattedData;
         }
         return formattedData;
+    }
+
+    public String obtenerDatos() {
+        return matchData;
     }
 
     public static void stopService(Context context) {
@@ -419,6 +452,6 @@ public class ForegroundService extends Service {
             );
             outputStream.write(httpResponse.getBytes());
             outputStream.flush();
-}
-}
+        }
+    }
 }
