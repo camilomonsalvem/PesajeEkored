@@ -47,14 +47,13 @@ import java.util.regex.Pattern;
 public class ForegroundService extends Service {
 
     private static final String TAG = "ForegroundService";
-    private UsbSerialPort usbSerialPort;
-    private String receivedData = "";
-    private String matchData = "";
-    private StringBuilder dataBuffer = new StringBuilder();
     private NotificationManager notificationManager;
-    private boolean isStarted = false;
     private final Handler handler = new Handler();
-    private final int updateInterval = 1000; // Intervalo en milisegundos para actualizar la notificación
+    private static final int ONGOING_NOTIFICATION_ID = 101;
+    private static final String CHANNEL_ID = "1001";
+    private final ExecutorService executorService = Executors.newFixedThreadPool(4);
+
+    private ServerSocket serverSocket;
 
     // Define commands and corresponding patterns
     private static final Map<String, Pattern[]> COMMAND_PATTERNS = new HashMap<>();
@@ -81,9 +80,7 @@ public class ForegroundService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        isStarted = false;
-        stopServer(); // Ensure the server is stopped when the activity is destroyed
-        // Cerrar el ThreadPoolExecutor al destruir la actividad
+        stopServer();
         executorService.shutdown();
         Log.d(TAG, "Enter onDestroy");
         try {
@@ -96,25 +93,11 @@ public class ForegroundService extends Service {
             Log.e(TAG, "Error: ", e);
             executorService.shutdownNow();
         }
-        handler.removeCallbacks(updateNotificationTask); // Detener la actualización de la notificación
     }
 
     @Override
     public IBinder onBind(Intent intent) {
         throw new UnsupportedOperationException("Not yet implemented");
-    }
-
-    @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
-        connectUsb();
-
-        if (!isStarted) {
-            makeForeground(obtenerDatosDeBascula());
-            isStarted = true;
-        }
-
-        //handler.post(updateNotificationTask);
-        return START_STICKY;
     }
 
     private void makeForeground(String data) {
@@ -139,179 +122,6 @@ public class ForegroundService extends Service {
         notificationManager.createNotificationChannel(channel);
     }
 
-    private void updateNotification(String weightData) {
-        Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Aplicación Pesaje Ekored")
-                .setContentText("La aplicación se encuentra en ejecución...")
-                .setSmallIcon(R.drawable.ic_notification)
-                .build();
-        notificationManager.notify(ONGOING_NOTIFICATION_ID, notification);
-    }
-
-    private final Runnable updateNotificationTask = new Runnable() {
-        @Override
-        public void run() {
-            String weightData = obtenerDatosDeBascula();
-            Log.d(TAG, "weightData: " + weightData);
-            updateNotification(weightData);
-            handler.postDelayed(this, updateInterval);
-        }
-    };
-
-    public static final int ONGOING_NOTIFICATION_ID = 101;
-    public static final String CHANNEL_ID = "1001";
-
-    public static void startService(Context context) {
-        Intent intent = new Intent(context, ForegroundService.class);
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            context.startService(intent);
-        } else {
-            context.startForegroundService(intent);
-        }
-    }
-
-    private void connectUsb() {
-        UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
-        UsbDevice device = null;
-
-        // Obtener el dispositivo USB
-        for (UsbDevice v : usbManager.getDeviceList().values()) {
-            device = v;
-            break;  // Usa el primer dispositivo USB encontrado
-        }
-
-        if (device == null) {
-            Log.e(TAG, "No USB device found");
-            return;
-        }
-
-        UsbSerialDriver driver = UsbSerialProber.getDefaultProber().probeDevice(device);
-        if (driver == null || driver.getPorts().isEmpty()) {
-            Log.e(TAG, "No USB driver or ports found for the device");
-            return;
-        }
-
-        usbSerialPort = driver.getPorts().get(0);
-        UsbDeviceConnection usbConnection = usbManager.openDevice(driver.getDevice());
-        if (usbConnection == null) {
-            Log.e(TAG, "Opening USB connection failed");
-            return;
-        }
-
-        try {
-            usbSerialPort.open(usbConnection);
-            usbSerialPort.setParameters(9600, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
-        } catch (IOException e) {
-            Log.e(TAG, "Error setting up USB connection", e);
-            return;
-        }
-
-        // Start reading data from the USB device
-        startReadingUsbData("$"); // Default command, can be changed based on requirement
-    }
-
-    private void startReadingUsbData(String command) {
-        new Thread(() -> {
-            byte[] buffer = new byte[1028];
-            try {
-                // Send command to the scale
-                usbSerialPort.write(command.getBytes(), 1000);
-            } catch (IOException e) {
-                Log.e(TAG, "Error writing command to USB", e);
-            }
-
-            while (true) {
-                try {
-                    int numBytesRead = usbSerialPort.read(buffer, 1000);
-                    if (numBytesRead > 0) {
-                        String data = new String(buffer, 0, numBytesRead);
-                        Log.d(TAG, "numBytesRead: " + numBytesRead);
-                        Log.d(TAG, "Received data: " + data);
-                        dataBuffer.append(data);
-
-                        // Process buffer and extract weight data
-                        processBuffer(command);
-                    }
-                } catch (IOException e) {
-                    Log.e(TAG, "Error reading from USB", e);
-                    break;
-                }
-            }
-        }).start();
-    }
-
-    private void processBuffer(String command) {
-        // Unify the buffer into a single string
-        String completeData = dataBuffer.toString();
-        matchData = completeData;
-        Log.d(TAG, "Complete data: " + completeData);
-
-        // Get patterns for the specific command
-        Pattern[] patterns = COMMAND_PATTERNS.get(command);
-
-        if (patterns != null) {
-            for (Pattern pattern : patterns) {
-                Matcher matcher = pattern.matcher(completeData);
-                if (matcher.find()) {
-                    String matchedData = matcher.group();
-                    Log.d(TAG, "Matched data: " + matchedData);
-
-                    // Normalize matched data
-                    receivedData = matchedData
-                            .replace("=", "")
-                            .replace("c", "")
-                            .replace("+", "")
-                            .replace("kg", "")
-                            .replace("ST,GS,", "")
-                            .trim();
-
-                    dataBuffer.delete(0, matcher.end());
-                    Log.d(TAG, "Processed weight data: " + receivedData);
-                    return;
-                }
-            }
-        }
-    }
-
-    public String obtenerDatosDeBascula() {
-        if (receivedData.isEmpty()) {
-            return "0.0";
-        }
-        // Eliminar ceros a la izquierda
-        String formattedData = receivedData.replaceFirst("^0+(?!$)", "");
-        // Asegurar que el formato sea correcto si el valor empieza con un punto
-        if (formattedData.startsWith(".")) {
-            formattedData = "0" + formattedData;
-        }
-        return formattedData;
-    }
-
-    public String obtenerDatos() {
-        return matchData;
-    }
-
-    public static void stopService(Context context) {
-        Intent intent = new Intent(context, ForegroundService.class);
-        context.stopService(intent);
-    }
-
-    private static final Set<String> ALLOWED_ORIGINS = new HashSet<>();
-    private ServerSocket serverSocket;
-
-    static {
-        ALLOWED_ORIGINS.add("http://localhost:5173");
-        ALLOWED_ORIGINS.add("https://qa.ekored.site");
-        ALLOWED_ORIGINS.add("https://ekored.site");
-        ALLOWED_ORIGINS.add("https://siekored.enka.com.co");
-        ALLOWED_ORIGINS.add("https://dllosiekored.enka.com.co");
-        ALLOWED_ORIGINS.add("https://dlloekored.enka.com.co");
-        ALLOWED_ORIGINS.add("https://dlloekored.enka.com.co:8081");
-        ALLOWED_ORIGINS.add("http://127.0.0.1:5001");
-        ALLOWED_ORIGINS.add("*");
-    }
-
-    private final ExecutorService executorService = Executors.newFixedThreadPool(4);
-
     private void startServer() {
         stopServer();
         new Thread(new HttpServerThread()).start();
@@ -327,21 +137,18 @@ public class ForegroundService extends Service {
         }
     }
 
-    public String obtenerNombreDeDispositivo() {
-        String deviceName = "";
-        Log.d(TAG, "Devicename: " + deviceName);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            deviceName = Settings.Global.getString(getContentResolver(), Settings.Global.DEVICE_NAME);
-            Log.d(TAG, "Devicename: " + deviceName);
-        }
-        if (deviceName == null || deviceName.isEmpty()) {
-            deviceName = Build.MODEL;
-        }
-        if (deviceName == null || deviceName.isEmpty()) {
-            deviceName = "Unknown Device";
-        }
-        Log.d(TAG, "Devicename after if: " + deviceName);
-        return deviceName;
+    private static final Set<String> ALLOWED_ORIGINS = new HashSet<>();
+
+    static {
+        ALLOWED_ORIGINS.add("http://localhost:5173");
+        ALLOWED_ORIGINS.add("https://qa.ekored.site");
+        ALLOWED_ORIGINS.add("https://ekored.site");
+        ALLOWED_ORIGINS.add("https://siekored.enka.com.co");
+        ALLOWED_ORIGINS.add("https://dllosiekored.enka.com.co");
+        ALLOWED_ORIGINS.add("https://dlloekored.enka.com.co");
+        ALLOWED_ORIGINS.add("https://dlloekored.enka.com.co:8081");
+        ALLOWED_ORIGINS.add("http://127.0.0.1:5001");
+        ALLOWED_ORIGINS.add("*");
     }
 
     private class HttpServerThread implements Runnable {
@@ -415,7 +222,14 @@ public class ForegroundService extends Service {
                     }
                     sendResponse(outputStream, 200, jsonResponse.toString(), "application/json");
                 } else if ("leer-peso".equals(endpoint)) {
-                    String data = obtenerDatosDeBascula();
+                    String puerto = getQueryParameter(path, "puerto");
+                    int baudRate = Integer.parseInt(getQueryParameter(path, "baudRate", "9600"));
+                    String paridad = getQueryParameter(path, "paridad", "N");
+                    int bitDato = Integer.parseInt(getQueryParameter(path, "bitDeDato", "8"));
+                    int bitParada = Integer.parseInt(getQueryParameter(path, "bitDeParada", "1"));
+                    String comando = getQueryParameter(path, "comando", "$");
+
+                    String data = leerPeso(puerto, baudRate, paridad, bitDato, bitParada, comando);
                     JSONObject jsonResponse = new JSONObject();
                     try {
                         jsonResponse.put("weight", data);
@@ -453,5 +267,145 @@ public class ForegroundService extends Service {
             outputStream.write(httpResponse.getBytes());
             outputStream.flush();
         }
+
+        private String getQueryParameter(String path, String parameter) {
+            return getQueryParameter(path, parameter, null);
+        }
+
+        private String getQueryParameter(String path, String parameter, String defaultValue) {
+            String[] queryParts = path.split("\\?");
+            if (queryParts.length > 1) {
+                String query = queryParts[1];
+                String[] params = query.split("&");
+                for (String param : params) {
+                    String[] keyValue = param.split("=");
+                    if (keyValue.length > 1 && keyValue[0].equals(parameter)) {
+                        return keyValue[1];
+                    }
+                }
+            }
+            return defaultValue;
+        }
+    }
+
+    private String leerPeso(String puerto, int baudRate, String paridad, int bitDato, int bitParada, String comando) {
+        UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
+        UsbDevice device = null;
+
+        for (UsbDevice v : usbManager.getDeviceList().values()) {
+            device = v;
+            break;  // Usa el primer dispositivo USB encontrado
+        }
+
+        if (device == null) {
+            Log.e(TAG, "No USB device found");
+            return "0.0";
+        }
+
+        UsbSerialDriver driver = UsbSerialProber.getDefaultProber().probeDevice(device);
+        if (driver == null || driver.getPorts().isEmpty()) {
+            Log.e(TAG, "No USB driver or ports found for the device");
+            return "0.0";
+        }
+
+        UsbSerialPort usbSerialPort = driver.getPorts().get(0);
+        UsbDeviceConnection usbConnection = usbManager.openDevice(driver.getDevice());
+        if (usbConnection == null) {
+            Log.e(TAG, "Opening USB connection failed");
+            return "0.0";
+        }
+
+        try {
+            usbSerialPort.open(usbConnection);
+            usbSerialPort.setParameters(baudRate, bitDato, bitParada, UsbSerialPort.PARITY_NONE);
+
+            // Send command to the scale
+            usbSerialPort.write(comando.getBytes(), 1000);
+
+            // Read data from the scale
+            byte[] buffer = new byte[1028];
+            int numBytesRead = usbSerialPort.read(buffer, 1000);
+            if (numBytesRead > 0) {
+                String data = new String(buffer, 0, numBytesRead);
+                Log.d(TAG, "Received data: " + data);
+
+                // Process buffer and extract weight data
+                return processBuffer(data, comando);
+            }
+
+        } catch (IOException e) {
+            Log.e(TAG, "Error setting up USB connection", e);
+        } finally {
+            try {
+                usbSerialPort.close();
+            } catch (IOException e) {
+                Log.e(TAG, "Error closing USB connection", e);
+            }
+        }
+
+        return "0.0";
+    }
+
+    private String processBuffer(String completeData, String command) {
+        Log.d(TAG, "Complete data: " + completeData);
+
+        // Get patterns for the specific command
+        Pattern[] patterns = COMMAND_PATTERNS.get(command);
+
+        if (patterns != null) {
+            for (Pattern pattern : patterns) {
+                Matcher matcher = pattern.matcher(completeData);
+                if (matcher.find()) {
+                    String matchedData = matcher.group();
+                    Log.d(TAG, "Matched data: " + matchedData);
+
+                    // Normalize matched data
+                    String receivedData = matchedData
+                            .replace("=", "")
+                            .replace("c", "")
+                            .replace("+", "")
+                            .replace("kg", "")
+                            .replace("ST,GS,", "")
+                            .trim();
+
+                    Log.d(TAG, "Processed weight data: " + receivedData);
+                    return receivedData;
+                }
+            }
+        }
+        return "0.0";
+    }
+
+    public String obtenerNombreDeDispositivo() {
+        String deviceName = "";
+        Log.d(TAG, "Devicename: " + deviceName);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            deviceName = Settings.Global.getString(getContentResolver(), Settings.Global.DEVICE_NAME);
+            Log.d(TAG, "Devicename: " + deviceName);
+        }
+        if (deviceName == null || deviceName.isEmpty()) {
+            deviceName = Build.MODEL;
+        }
+        if (deviceName == null || deviceName.isEmpty()) {
+            deviceName = "Unknown Device";
+        }
+        Log.d(TAG, "Devicename after if: " + deviceName);
+        return deviceName;
+    }
+
+    // Add a static method to start the service
+    public static void startService(Context context) {
+        Intent intent = new Intent(context, ForegroundService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent);
+        } else {
+            context.startService(intent);
+        }
+    }
+
+    // Add a static method to stop the service
+    public static void stopService(Context context) {
+        Intent intent = new Intent(context, ForegroundService.class);
+        context.stopService(intent);
     }
 }
