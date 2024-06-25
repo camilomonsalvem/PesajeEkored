@@ -106,7 +106,7 @@ public class ForegroundService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        connectUsb();
+        //connectUsb();
 
         if (!isStarted) {
             makeForeground(obtenerDatosDeBascula());
@@ -170,7 +170,7 @@ public class ForegroundService extends Service {
         }
     }
 
-    private void connectUsb() {
+    private void connectUsb(String puerto, int baudRate, String paridad, int bitDato, int bitParada, String comando) {
         UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
         UsbDevice device = null;
 
@@ -200,14 +200,16 @@ public class ForegroundService extends Service {
 
         try {
             usbSerialPort.open(usbConnection);
-            usbSerialPort.setParameters(9600, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+            usbSerialPort.setParameters(baudRate, bitDato, bitParada, UsbSerialPort.PARITY_NONE);
+            //usbSerialPort.setParameters(9600, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
         } catch (IOException e) {
             Log.e(TAG, "Error setting up USB connection", e);
             return;
         }
 
         // Start reading data from the USB device
-        startReadingUsbData("$"); // Default command, can be changed based on requirement
+        startReadingUsbData(comando);
+        //startReadingUsbData("$"); // Default command, can be changed based on requirement
     }
 
     private void startReadingUsbData(String command) {
@@ -415,6 +417,14 @@ public class ForegroundService extends Service {
                     }
                     sendResponse(outputStream, 200, jsonResponse.toString(), "application/json");
                 } else if ("leer-peso".equals(endpoint)) {
+                    String puerto = getQueryParameter(path, "puerto");
+                    int baudRate = Integer.parseInt(getQueryParameter(path, "baudRate", "9600"));
+                    String paridad = getQueryParameter(path, "paridad", "N");
+                    int bitDato = Integer.parseInt(getQueryParameter(path, "bitDeDato", "8"));
+                    int bitParada = Integer.parseInt(getQueryParameter(path, "bitDeParada", "1"));
+                    String comando = getQueryParameter(path, "comando", "$");
+
+                    connectUsb(puerto, baudRate, paridad, bitDato, bitParada, comando);
                     String data = obtenerDatosDeBascula();
                     JSONObject jsonResponse = new JSONObject();
                     try {
@@ -452,6 +462,25 @@ public class ForegroundService extends Service {
             );
             outputStream.write(httpResponse.getBytes());
             outputStream.flush();
+        }
+
+        private String getQueryParameter(String path, String parameter) {
+            return getQueryParameter(path, parameter, null);
+        }
+
+        private String getQueryParameter(String path, String parameter, String defaultValue) {
+            String[] queryParts = path.split("\\?");
+            if (queryParts.length > 1) {
+                String query = queryParts[1];
+                String[] params = query.split("&");
+                for (String param : params) {
+                    String[] keyValue = param.split("=");
+                    if (keyValue.length > 1 && keyValue[0].equals(parameter)) {
+                        return keyValue[1];
+                    }
+                }
+            }
+            return defaultValue;
         }
     }
 }
