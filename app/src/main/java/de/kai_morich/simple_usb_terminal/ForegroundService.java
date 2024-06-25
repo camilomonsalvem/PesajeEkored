@@ -16,14 +16,11 @@ import androidx.core.app.NotificationCompat;
 
 import android.provider.Settings;
 import android.util.Log;
-
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialPort;
 import com.hoho.android.usbserial.driver.UsbSerialProber;
-
 import org.json.JSONException;
 import org.json.JSONObject;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -83,7 +80,6 @@ public class ForegroundService extends Service {
         super.onDestroy();
         isStarted = false;
         stopServer(); // Ensure the server is stopped when the activity is destroyed
-        // Cerrar el ThreadPoolExecutor al destruir la actividad
         executorService.shutdown();
         Log.d(TAG, "Enter onDestroy");
         try {
@@ -106,14 +102,10 @@ public class ForegroundService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        //connectUsb();
-
         if (!isStarted) {
             makeForeground(obtenerDatosDeBascula());
             isStarted = true;
         }
-
-        //handler.post(updateNotificationTask);
         return START_STICKY;
     }
 
@@ -200,23 +192,20 @@ public class ForegroundService extends Service {
 
         try {
             usbSerialPort.open(usbConnection);
-            usbSerialPort.setParameters(baudRate, bitDato, bitParada, UsbSerialPort.PARITY_NONE);
-            //usbSerialPort.setParameters(9600, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+            int parity = paridad.equals("N") ? UsbSerialPort.PARITY_NONE : paridad.equals("E") ? UsbSerialPort.PARITY_EVEN : UsbSerialPort.PARITY_ODD;
+            usbSerialPort.setParameters(baudRate, bitDato, bitParada, parity);
         } catch (IOException e) {
             Log.e(TAG, "Error setting up USB connection", e);
             return;
         }
 
-        // Start reading data from the USB device
-        startReadingUsbData(comando);
-        //startReadingUsbData("$"); // Default command, can be changed based on requirement
+        startReadingUsbData("$");
     }
 
     private void startReadingUsbData(String command) {
         new Thread(() -> {
             byte[] buffer = new byte[1028];
             try {
-                // Send command to the scale
                 usbSerialPort.write(command.getBytes(), 1000);
             } catch (IOException e) {
                 Log.e(TAG, "Error writing command to USB", e);
@@ -230,8 +219,6 @@ public class ForegroundService extends Service {
                         Log.d(TAG, "numBytesRead: " + numBytesRead);
                         Log.d(TAG, "Received data: " + data);
                         dataBuffer.append(data);
-
-                        // Process buffer and extract weight data
                         processBuffer(command);
                     }
                 } catch (IOException e) {
@@ -243,12 +230,10 @@ public class ForegroundService extends Service {
     }
 
     private void processBuffer(String command) {
-        // Unify the buffer into a single string
         String completeData = dataBuffer.toString();
         matchData = completeData;
         Log.d(TAG, "Complete data: " + completeData);
 
-        // Get patterns for the specific command
         Pattern[] patterns = COMMAND_PATTERNS.get(command);
 
         if (patterns != null) {
@@ -258,7 +243,6 @@ public class ForegroundService extends Service {
                     String matchedData = matcher.group();
                     Log.d(TAG, "Matched data: " + matchedData);
 
-                    // Normalize matched data
                     receivedData = matchedData
                             .replace("=", "")
                             .replace("c", "")
@@ -279,9 +263,7 @@ public class ForegroundService extends Service {
         if (receivedData.isEmpty()) {
             return "0.0";
         }
-        // Eliminar ceros a la izquierda
         String formattedData = receivedData.replaceFirst("^0+(?!$)", "");
-        // Asegurar que el formato sea correcto si el valor empieza con un punto
         if (formattedData.startsWith(".")) {
             formattedData = "0" + formattedData;
         }
@@ -417,12 +399,14 @@ public class ForegroundService extends Service {
                     }
                     sendResponse(outputStream, 200, jsonResponse.toString(), "application/json");
                 } else if ("leer-peso".equals(endpoint)) {
-                    String puerto = getQueryParameter(path, "puerto");
-                    int baudRate = Integer.parseInt(getQueryParameter(path, "baudRate", "9600"));
-                    String paridad = getQueryParameter(path, "paridad", "N");
-                    int bitDato = Integer.parseInt(getQueryParameter(path, "bitDeDato", "8"));
-                    int bitParada = Integer.parseInt(getQueryParameter(path, "bitDeParada", "1"));
-                    String comando = getQueryParameter(path, "comando", "$");
+                    Map<String, String> queryParams = getQueryParameters(path);
+
+                    String puerto = queryParams.get("puerto");
+                    int baudRate = Integer.parseInt(getOrDefault(queryParams, "baudRate", "9600"));
+                    String paridad = getOrDefault(queryParams, "paridad", "N");
+                    int bitDato = Integer.parseInt(getOrDefault(queryParams, "bitDeDato", "8"));
+                    int bitParada = Integer.parseInt(getOrDefault(queryParams, "bitDeParada", "1"));
+                    String comando = getOrDefault(queryParams, "comando","$");
 
                     connectUsb(puerto, baudRate, paridad, bitDato, bitParada, comando);
                     String data = obtenerDatosDeBascula();
@@ -464,23 +448,24 @@ public class ForegroundService extends Service {
             outputStream.flush();
         }
 
-        private String getQueryParameter(String path, String parameter) {
-            return getQueryParameter(path, parameter, null);
-        }
-
-        private String getQueryParameter(String path, String parameter, String defaultValue) {
+        private Map<String, String> getQueryParameters(String path) {
+            Map<String, String> queryParams = new HashMap<>();
             String[] queryParts = path.split("\\?");
             if (queryParts.length > 1) {
                 String query = queryParts[1];
                 String[] params = query.split("&");
                 for (String param : params) {
                     String[] keyValue = param.split("=");
-                    if (keyValue.length > 1 && keyValue[0].equals(parameter)) {
-                        return keyValue[1];
+                    if (keyValue.length > 1) {
+                        queryParams.put(keyValue[0], keyValue[1]);
                     }
                 }
             }
-            return defaultValue;
+            return queryParams;
+        }
+
+        private String getOrDefault(Map<String, String> map, String key, String defaultValue) {
+            return map.containsKey(key) ? map.get(key) : defaultValue;
         }
     }
 }
