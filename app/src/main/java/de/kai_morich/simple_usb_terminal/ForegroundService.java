@@ -260,7 +260,7 @@ public class ForegroundService extends Service {
 
     private void ensureConnection(String puerto, int baudRate, String paridad, int bitDato, int bitParada, String comando) {
         int retryCount = 0;
-        while (!isPortOpen() && retryCount < 20) {
+        while (!isPortOpen() && retryCount < 25) {
             connectUsb(puerto, baudRate, paridad, bitDato, bitParada, comando);
             retryCount++;
             try {
