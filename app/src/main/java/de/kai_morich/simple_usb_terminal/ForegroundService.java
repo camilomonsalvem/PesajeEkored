@@ -354,36 +354,47 @@ public class ForegroundService extends Service {
             }
         }).start();
     }
-     */
+    */
 
     private void processBuffer(String command) {
         String completeData = dataBuffer.toString();
-        matchData = completeData;
         Log.d(TAG, "Complete data: " + completeData);
 
-        Pattern[] patterns = COMMAND_PATTERNS.get(command);
+        // Buscar todos los números que pueden incluir un punto decimal
+        Pattern pattern = Pattern.compile("-?\\d+(\\.\\d+)?");
+        Matcher matcher = pattern.matcher(completeData);
 
-        if (patterns != null) {
-            for (Pattern pattern : patterns) {
-                Matcher matcher = pattern.matcher(completeData);
-                if (matcher.find()) {
-                    String matchedData = matcher.group();
-                    Log.d(TAG, "Matched data: " + matchedData);
+        String lastMatchedData = null;
 
-                    receivedData = matchedData
-                            .replace("=", "")
-                            .replace("c", "")
-                            .replace("+", "")
-                            .replace("kg", "")
-                            .replace("ST,GS,", "")
-                            .trim();
+        while (matcher.find()) {
+            lastMatchedData = matcher.group();
+            Log.d(TAG, "Matched data: " + lastMatchedData);
+        }
 
-                    dataBuffer.delete(0, matcher.end());
-                    Log.d(TAG, "Processed weight data: " + receivedData);
-                    return;
-                }
+        // Si encontramos un número, procesamos el último encontrado
+        if (lastMatchedData != null) {
+            try {
+                // Convertir el último número encontrado a float y almacenarlo
+                float weight = Float.parseFloat(lastMatchedData);
+                receivedData = String.format(Locale.US, "%.2f", weight);
+                Log.d(TAG, "Processed weight data: " + receivedData);
+
+                // Limpiar el buffer hasta el final del último dato procesado
+                dataBuffer.delete(0, matcher.end());
+            } catch (NumberFormatException e) {
+                Log.e(TAG, "Error parsing number: " + lastMatchedData, e);
             }
         }
+
+        // Opcional: Limpiar el buffer si se acumula demasiado sin datos válidos
+        if (dataBuffer.length() > 500) {
+            dataBuffer.delete(0, dataBuffer.length() - 100); // Dejar los últimos 100 caracteres para el próximo procesamiento
+        }
+    }
+
+    private boolean isWeightValid(float weight) {
+        // Implementa lógica específica para validar el peso, por ejemplo:
+        return weight < 100000;  // Suponiendo que los pesos deberían estar entre 0 y 500 kg
     }
 
     public String obtenerDatosDeBascula() {
