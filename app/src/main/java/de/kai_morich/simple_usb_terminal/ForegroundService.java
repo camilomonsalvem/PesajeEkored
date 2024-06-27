@@ -79,21 +79,27 @@ public class ForegroundService extends Service {
     public void onDestroy() {
         super.onDestroy();
         isStarted = false;
-        stopServer(); // Ensure the server is stopped when the activity is destroyed
+        stopServer();
         executorService.shutdown();
         Log.d(TAG, "Enter onDestroy");
         try {
-            Log.d(TAG, "Try");
             if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
                 executorService.shutdownNow();
-                Log.d(TAG, "If");
             }
         } catch (InterruptedException e) {
             Log.e(TAG, "Error: ", e);
             executorService.shutdownNow();
         }
-        handler.removeCallbacks(updateNotificationTask); // Detener la actualización de la notificación
+        handler.removeCallbacks(updateNotificationTask);
+        if (usbSerialPort != null) {
+            try {
+                usbSerialPort.close();
+            } catch (IOException e) {
+                Log.e(TAG, "Error closing USB port", e);
+            }
+        }
     }
+
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -105,9 +111,11 @@ public class ForegroundService extends Service {
         if (!isStarted) {
             makeForeground(obtenerDatosDeBascula());
             isStarted = true;
+            handler.post(updateNotificationTask); // Start notification updates
         }
         return START_STICKY;
     }
+
 
     private void makeForeground(String data) {
         createServiceNotificationChannel();
@@ -202,6 +210,50 @@ public class ForegroundService extends Service {
         // startReadingUsbData(comando);
         startReadingUsbData("$");
     }
+
+    private void connectUsbOnce(String puerto, int baudRate, String paridad, int bitDato, int bitParada, String comando) {
+        if (usbSerialPort != null && usbSerialPort.isOpen()) {
+            // USB port is already open
+            startReadingUsbData(comando);
+            return;
+        }
+
+        UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
+        UsbDevice device = null;
+
+        for (UsbDevice v : usbManager.getDeviceList().values()) {
+            device = v;
+            break;
+        }
+
+        if (device == null) {
+            Log.e(TAG, "No USB device found");
+            return;
+        }
+
+        UsbSerialDriver driver = UsbSerialProber.getDefaultProber().probeDevice(device);
+        if (driver == null || driver.getPorts().isEmpty()) {
+            Log.e(TAG, "No USB driver or ports found for the device");
+            return;
+        }
+
+        usbSerialPort = driver.getPorts().get(0);
+        UsbDeviceConnection usbConnection = usbManager.openDevice(driver.getDevice());
+        if (usbConnection == null) {
+            Log.e(TAG, "Opening USB connection failed");
+            return;
+        }
+
+        try {
+            usbSerialPort.open(usbConnection);
+            int parity = paridad.equals("N") ? UsbSerialPort.PARITY_NONE : paridad.equals("E") ? UsbSerialPort.PARITY_EVEN : UsbSerialPort.PARITY_ODD;
+            usbSerialPort.setParameters(baudRate, bitDato, bitParada, parity);
+            startReadingUsbData(comando);
+        } catch (IOException e) {
+            Log.e(TAG, "Error setting up USB connection", e);
+        }
+    }
+
 
     private void startReadingUsbData(String command) {
         new Thread(() -> {
@@ -407,10 +459,18 @@ public class ForegroundService extends Service {
                     String paridad = getOrDefault(queryParams, "paridad", "N");
                     int bitDato = Integer.parseInt(getOrDefault(queryParams, "bitDeDato", "8"));
                     int bitParada = Integer.parseInt(getOrDefault(queryParams, "bitDeParada", "1"));
-                    String comando = getOrDefault(queryParams, "comando","$");
+                    String comando = getOrDefault(queryParams, "comando", "$");
 
                     Log.d("COMMAND", "Comando: " + comando);
-                    connectUsb(puerto, baudRate, paridad, bitDato, bitParada, comando);
+                    connectUsbOnce(puerto, baudRate, paridad, bitDato, bitParada, comando);
+
+                    // Delay to ensure data is read
+                    try {
+                        Thread.sleep(1000);  // Adjust the delay as needed
+                    } catch (InterruptedException e) {
+                        Log.e(TAG, "Interrupted", e);
+                    }
+
                     String data = obtenerDatosDeBascula();
                     JSONObject jsonResponse = new JSONObject();
                     try {
