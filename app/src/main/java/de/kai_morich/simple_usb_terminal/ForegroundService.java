@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.lang.reflect.Array;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -40,6 +41,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.json.JSONArray;
+import org.json.JSONException;
 
 public class ForegroundService extends Service {
 
@@ -63,7 +66,10 @@ public class ForegroundService extends Service {
                 Pattern.compile("ST,GS,\\+\\d{5}\\.\\dkg")  // Pattern 3: ST,GS,+XXXXX.Xkg
         });
         COMMAND_PATTERNS.put("R", new Pattern[]{
-                Pattern.compile("ST,GS,\\+\\d{5}\\.\\dkg")  // Example pattern for command "R"
+                Pattern.compile("ST,GS,\\+\\d{5}\\.\\dkg"),  // Example pattern for command "R"
+                Pattern.compile("=c?\\d{4}\\.\\d"),         // Pattern 1: =cXXXX.X
+                Pattern.compile("\\+\\s*\\d{1,5}\\.\\dkg"), // Pattern 2: +XXXXX.Xkg (with optional spaces)
+                Pattern.compile("ST,GS,\\+\\d{5}\\.\\dkg")  // Pattern 3: ST,GS,+XXXXX.Xkg
         });
         // Add more commands and patterns as needed
     }
@@ -131,7 +137,7 @@ public class ForegroundService extends Service {
         notificationManager.createNotificationChannel(channel);
     }
 
-    private void updateNotification(String weightData) {
+    private void updateNotification() {
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Aplicación Pesaje Ekored")
                 .setContentText("La aplicación se esta ejecutando...")
@@ -143,9 +149,9 @@ public class ForegroundService extends Service {
     private final Runnable updateNotificationTask = new Runnable() {
         @Override
         public void run() {
-            String weightData = obtenerDatosDeBascula();
-            Log.d(TAG, "weightData: " + weightData);
-            updateNotification(weightData);
+            //String weightData = obtenerDatosDeBascula();
+            //Log.d("", "weightData: " + weightData);
+            updateNotification();
             handler.postDelayed(this, updateInterval);
         }
     };
@@ -199,8 +205,18 @@ public class ForegroundService extends Service {
             return;
         }
 
-        // startReadingUsbData(comando);
-        startReadingUsbData("$");
+        try {
+            JSONArray comandoArray = new JSONArray(comando);
+            String comandoFormateado = comandoArray.getString(0);
+            Log.d("COMMAND", "FORMATEADO: " + comandoFormateado);
+            //startReadingUsbData(comandoFormateado);
+            startReadingUsbData("R");
+        } catch (JSONException e) {
+            Log.e(TAG, "Error parsing JSON command", e);
+            // Handle error appropriately, e.g., return or set a default command
+            startReadingUsbData("$");
+        }
+        //startReadingUsbData("$");
     }
 
     private void startReadingUsbData(String command) {
@@ -217,8 +233,8 @@ public class ForegroundService extends Service {
                     int numBytesRead = usbSerialPort.read(buffer, 1000);
                     if (numBytesRead > 0) {
                         String data = new String(buffer, 0, numBytesRead);
-                        Log.d(TAG, "numBytesRead: " + numBytesRead);
-                        Log.d(TAG, "Received data: " + data);
+                        //Log.d(TAG, "numBytesRead: " + numBytesRead);
+                        //Log.d(TAG, "Received data: " + data);
                         dataBuffer.append(data);
                         processBuffer(command);
                     }
