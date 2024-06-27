@@ -87,7 +87,7 @@ public class ForegroundService extends Service {
         });
         // Add more commands and patterns as needed
     }
-    
+
      */
 
     @Override
