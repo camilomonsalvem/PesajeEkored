@@ -56,7 +56,7 @@ public class ForegroundService extends Service {
     private UsbSerialPort usbSerialPort;
     private String receivedData = "";
     private String matchData = "";
-    private StringBuilder dataBuffer = new StringBuilder();
+    private final StringBuilder dataBuffer = new StringBuilder();
     private NotificationManager notificationManager;
     private boolean isStarted = false;
     private final Handler handler = new Handler();
@@ -313,7 +313,9 @@ public class ForegroundService extends Service {
                         int numBytesRead = usbSerialPort.read(buffer, 1000);
                         if (numBytesRead > 0) {
                             String data = new String(buffer, 0, numBytesRead);
-                            dataBuffer.append(data);
+                            synchronized (dataBuffer) {
+                                dataBuffer.append(data);
+                            }
                             processBuffer(command);
                         }
                     }
@@ -364,7 +366,10 @@ public class ForegroundService extends Service {
     */
 
     private void processBuffer(String command) {
-        String completeData = dataBuffer.toString();
+        String completeData;
+        synchronized (dataBuffer) {
+            completeData = dataBuffer.toString();
+        }
         Log.d(TAG, "Complete data: " + completeData);
 
         // Buscar todos los números que pueden incluir un punto decimal
@@ -382,14 +387,18 @@ public class ForegroundService extends Service {
                 Log.d(TAG, "Processed weight data: " + receivedData);
 
                 // Limpiar el buffer hasta el final del dato procesado para evitar procesarlo de nuevo
-                dataBuffer.delete(0, matcher.end());
+                synchronized (dataBuffer) {
+                    dataBuffer.delete(0, matcher.end());
+                }
             } catch (NumberFormatException e) {
                 Log.e(TAG, "Error parsing number: " + matchedData, e);
             }
         } else {
             // Si no se encontró un número válido, limpiar el buffer si se acumula demasiado
-            if (dataBuffer.length() > 500) {
-                dataBuffer.delete(0, dataBuffer.length() - 100); // Mantener los últimos 100 caracteres
+            synchronized (dataBuffer) {
+                if (dataBuffer.length() > 500) {
+                    dataBuffer.delete(0, dataBuffer.length() - 100); // Mantener los últimos 100 caracteres
+                }
             }
         }
     }
@@ -400,10 +409,14 @@ public class ForegroundService extends Service {
     }
 
     public String obtenerDatosDeBascula() {
-        if (receivedData.isEmpty()) {
+        String data;
+        synchronized (dataBuffer) {
+            data = receivedData;
+        }
+        if (data.isEmpty()) {
             return "0.0";
         }
-        String formattedData = receivedData.replaceFirst("^0+(?!$)", "");
+        String formattedData = data.replaceFirst("^0+(?!$)", "");
         if (formattedData.startsWith(".")) {
             formattedData = "0" + formattedData;
         }
