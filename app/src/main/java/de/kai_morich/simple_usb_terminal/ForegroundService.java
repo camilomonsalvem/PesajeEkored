@@ -4,8 +4,10 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
@@ -56,6 +58,13 @@ public class ForegroundService extends Service {
     private final Handler handler = new Handler();
     private final int updateInterval = 1000; // Intervalo en milisegundos para actualizar la notificación
 
+    private String lastPort;
+    private int lastBaudRate;
+    private String lastParity;
+    private int lastBitData;
+    private int lastStopBit;
+    private String lastCommand;
+
     // Define commands and corresponding patterns
     private static final Map<String, Pattern[]> COMMAND_PATTERNS = new HashMap<>();
 
@@ -79,11 +88,18 @@ public class ForegroundService extends Service {
         super.onCreate();
         notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         startServer();
+
+        // Registrar el BroadcastReceiver para escuchar la conexión y desconexión de dispositivos USB
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
+        filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
+        registerReceiver(usbReceiver,filter);
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
+        closeUsbConnection();
         isStarted = false;
         stopServer(); // Ensure the server is stopped when the activity is destroyed
         executorService.shutdown();
@@ -99,6 +115,7 @@ public class ForegroundService extends Service {
             executorService.shutdownNow();
         }
         handler.removeCallbacks(updateNotificationTask); // Detener la actualización de la notificación
+        unregisterReceiver(usbReceiver); // Desregistrar el BroadcastReceiver
     }
 
     @Override
@@ -169,56 +186,148 @@ public class ForegroundService extends Service {
     }
 
     private void connectUsb(String puerto, int baudRate, String paridad, int bitDato, int bitParada, String comando) {
+        // Guardar los últimos parámetros de conexión
+        lastPort = puerto;
+        lastBaudRate = baudRate;
+        lastParity = paridad;
+        lastBitData = bitDato;
+        lastStopBit = bitParada;
+        lastCommand=comando;
+
+        if (isPortOpen()) {
+            closeUsbConnection();
+        }
+
         UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
         UsbDevice device = null;
 
-        // Obtener el dispositivo USB
-        for (UsbDevice v : usbManager.getDeviceList().values()) {
-            device = v;
-            break;  // Usa el primer dispositivo USB encontrado
-        }
+        //if (usbSerialPort != null) {
+            // Obtener el dispositivo USB
+            for (UsbDevice v : usbManager.getDeviceList().values()) {
+                device = v;
+                break;  // Usa el primer dispositivo USB encontrado
+            }
 
-        if (device == null) {
-            Log.e(TAG, "No USB device found");
-            return;
-        }
+            if (device == null) {
+                Log.e(TAG, "No USB device found");
+                return;
+            }
 
-        UsbSerialDriver driver = UsbSerialProber.getDefaultProber().probeDevice(device);
-        if (driver == null || driver.getPorts().isEmpty()) {
-            Log.e(TAG, "No USB driver or ports found for the device");
-            return;
-        }
+            UsbSerialDriver driver = UsbSerialProber.getDefaultProber().probeDevice(device);
+            if (driver == null || driver.getPorts().isEmpty()) {
+                Log.e(TAG, "No USB driver or ports found for the device");
+                return;
+            }
 
-        usbSerialPort = driver.getPorts().get(0);
-        UsbDeviceConnection usbConnection = usbManager.openDevice(driver.getDevice());
-        if (usbConnection == null) {
-            Log.e(TAG, "Opening USB connection failed");
-            return;
-        }
+            usbSerialPort = driver.getPorts().get(0);
+            UsbDeviceConnection usbConnection = usbManager.openDevice(driver.getDevice());
+            if (usbConnection == null) {
+                Log.e(TAG, "Opening USB connection failed");
+                return;
+            }
 
-        try {
-            usbSerialPort.open(usbConnection);
-            int parity = paridad.equals("N") ? UsbSerialPort.PARITY_NONE : paridad.equals("E") ? UsbSerialPort.PARITY_EVEN : UsbSerialPort.PARITY_ODD;
-            usbSerialPort.setParameters(baudRate, bitDato, bitParada, parity);
-        } catch (IOException e) {
-            Log.e(TAG, "Error setting up USB connection", e);
-            return;
-        }
+            try {
+                usbSerialPort.open(usbConnection);
+                int parity = paridad.equals("N") ? UsbSerialPort.PARITY_NONE : paridad.equals("E") ? UsbSerialPort.PARITY_EVEN : UsbSerialPort.PARITY_ODD;
+                //usbSerialPort.setParameters(baudRate, bitDato, bitParada, parity);
+                if (!isPortOpen()) {
+                    Log.e(TAG, "USB port is not open. Attempting to reconnect...");
+                    ensureConnection(puerto, baudRate, paridad, bitDato, bitParada, comando);
+                    if (!isPortOpen()) {
+                        Log.e(TAG, "Failed to reopen USB port.");
+                        return;
+                    }
+                }
+            } catch (IOException e) {
+                Log.e(TAG, "Error setting up USB connection", e);
+                return;
+            }
 
-        try {
-            JSONArray comandoArray = new JSONArray(comando);
-            String comandoFormateado = comandoArray.getString(0);
-            Log.d("COMMAND", "FORMATEADO: " + comandoFormateado);
-            //startReadingUsbData(comandoFormateado);
-            startReadingUsbData("R");
-        } catch (JSONException e) {
-            Log.e(TAG, "Error parsing JSON command", e);
-            // Handle error appropriately, e.g., return or set a default command
-            startReadingUsbData("$");
-        }
+            try {
+                JSONArray comandoArray = new JSONArray(comando);
+                String comandoFormateado = comandoArray.getString(0);
+                Log.d("COMMAND", "FORMATEADO: " + comandoFormateado);
+                //startReadingUsbData(comandoFormateado);
+                startReadingUsbData("R");
+            } catch (JSONException e) {
+                Log.e(TAG, "Error parsing JSON command", e);
+                // Handle error appropriately, e.g., return or set a default command
+                startReadingUsbData("$");
+            }
+        //}
         //startReadingUsbData("$");
     }
 
+    private void ensureConnection(String puerto, int baudRate, String paridad, int bitDato, int bitParada, String comando) {
+        int retryCount = 0;
+        while (!isPortOpen() && retryCount < 20) {
+            connectUsb(puerto, baudRate, paridad, bitDato, bitParada, comando);
+            retryCount++;
+            try {
+                Thread.sleep(1000); // Espera un tiempo antes de reintento
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
+    private final Object usbLock = new Object();
+
+    private boolean isPortOpen() {
+        return usbSerialPort != null && usbSerialPort.isOpen();
+    }
+
+    private void closeUsbConnection() {
+        stopReadingUsbData();
+        if (usbSerialPort != null) {
+            try {
+                usbSerialPort.close();
+            } catch (IOException e) {
+                Log.e(TAG, "Error closing USB port", e);
+            }
+            usbSerialPort=null;
+        }
+    }
+
+    private Thread readingThread;
+
+    private void startReadingUsbData(String command) {
+        readingThread = new Thread(() -> {
+            byte[] buffer = new byte[1028];
+            synchronized (usbLock) {
+                if (!isPortOpen()) {
+                    Log.e(TAG, "USB port is not open");
+                    return;
+                }
+                try {
+                    usbSerialPort.write(command.getBytes(), 1000);
+                    while (!Thread.currentThread().isInterrupted()) {
+                        int numBytesRead = usbSerialPort.read(buffer, 1000);
+                        if (numBytesRead > 0) {
+                            String data = new String(buffer, 0, numBytesRead);
+                            dataBuffer.append(data);
+                            processBuffer(command);
+                        }
+                    }
+                } catch (IOException e) {
+                    Log.e(TAG, "Error writing/reading USB", e);
+                    stopReadingUsbData();  // Detiene la lectura debido al error
+                    closeUsbConnection();
+                }
+            }
+        });
+        readingThread.start();
+    }
+
+    private void stopReadingUsbData() {
+        if (readingThread != null) {
+            readingThread.interrupt();
+            readingThread=null;
+        }
+    }
+
+    /*
     private void startReadingUsbData(String command) {
         new Thread(() -> {
             byte[] buffer = new byte[1028];
@@ -245,6 +354,7 @@ public class ForegroundService extends Service {
             }
         }).start();
     }
+     */
 
     private void processBuffer(String command) {
         String completeData = dataBuffer.toString();
@@ -486,4 +596,29 @@ public class ForegroundService extends Service {
             return map.containsKey(key) ? map.get(key) : defaultValue;
         }
     }
+
+
+
+    private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)) {
+                UsbDevice device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+                if (device != null && usbSerialPort != null && usbSerialPort.getDriver().getDevice().equals(device)) {
+                    Log.d(TAG, "USB device attached");
+                    // Reutilizar los últimos parámetros de conexión conocidos para reconectar
+                    if (lastPort != null) {
+                        connectUsb(lastPort, lastBaudRate, lastParity, lastBitData, lastStopBit, lastCommand);
+                    }
+                }
+            } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
+                UsbDevice device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+                if (device != null && usbSerialPort != null && usbSerialPort.getDriver().getDevice().equals(device)) {
+                    Log.d(TAG, "USB device detached");
+                    closeUsbConnection();
+                }
+            }
+        }
+    };
 }
