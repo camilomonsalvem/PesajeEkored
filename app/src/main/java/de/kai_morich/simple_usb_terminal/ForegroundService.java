@@ -199,6 +199,7 @@ public class ForegroundService extends Service {
             return;
         }
 
+        // startReadingUsbData(comando);
         startReadingUsbData("$");
     }
 
@@ -408,6 +409,7 @@ public class ForegroundService extends Service {
                     int bitParada = Integer.parseInt(getOrDefault(queryParams, "bitDeParada", "1"));
                     String comando = getOrDefault(queryParams, "comando","$");
 
+                    Log.d("COMMAND", "Comando: " + comando);
                     connectUsb(puerto, baudRate, paridad, bitDato, bitParada, comando);
                     String data = obtenerDatosDeBascula();
                     JSONObject jsonResponse = new JSONObject();
