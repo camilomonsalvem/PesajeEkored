@@ -46,6 +46,10 @@ import java.util.regex.Pattern;
 import org.json.JSONArray;
 import org.json.JSONException;
 
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Collections;
+
 public class ForegroundService extends Service {
 
     private static final String TAG = "ForegroundService";
@@ -66,6 +70,7 @@ public class ForegroundService extends Service {
     private String lastCommand;
 
     // Define commands and corresponding patterns
+    /*
     private static final Map<String, Pattern[]> COMMAND_PATTERNS = new HashMap<>();
 
     static {
@@ -82,6 +87,8 @@ public class ForegroundService extends Service {
         });
         // Add more commands and patterns as needed
     }
+    
+     */
 
     @Override
     public void onCreate() {
@@ -361,34 +368,29 @@ public class ForegroundService extends Service {
         Log.d(TAG, "Complete data: " + completeData);
 
         // Buscar todos los números que pueden incluir un punto decimal
-        Pattern pattern = Pattern.compile("-?\\d+(\\.\\d+)?");
+        Pattern pattern = Pattern.compile("-?\\d+\\.\\d+");
         Matcher matcher = pattern.matcher(completeData);
 
-        String lastMatchedData = null;
+        if (matcher.find()) {
+            String matchedData = matcher.group();
+            Log.d(TAG, "Matched data: " + matchedData);
 
-        while (matcher.find()) {
-            lastMatchedData = matcher.group();
-            Log.d(TAG, "Matched data: " + lastMatchedData);
-        }
-
-        // Si encontramos un número, procesamos el último encontrado
-        if (lastMatchedData != null) {
+            // Convertir a número y hacer validaciones adicionales si es necesario
             try {
-                // Convertir el último número encontrado a float y almacenarlo
-                float weight = Float.parseFloat(lastMatchedData);
+                float weight = Float.parseFloat(matchedData);
                 receivedData = String.format(Locale.US, "%.2f", weight);
                 Log.d(TAG, "Processed weight data: " + receivedData);
 
-                // Limpiar el buffer hasta el final del último dato procesado
+                // Limpiar el buffer hasta el final del dato procesado para evitar procesarlo de nuevo
                 dataBuffer.delete(0, matcher.end());
             } catch (NumberFormatException e) {
-                Log.e(TAG, "Error parsing number: " + lastMatchedData, e);
+                Log.e(TAG, "Error parsing number: " + matchedData, e);
             }
-        }
-
-        // Opcional: Limpiar el buffer si se acumula demasiado sin datos válidos
-        if (dataBuffer.length() > 500) {
-            dataBuffer.delete(0, dataBuffer.length() - 100); // Dejar los últimos 100 caracteres para el próximo procesamiento
+        } else {
+            // Si no se encontró un número válido, limpiar el buffer si se acumula demasiado
+            if (dataBuffer.length() > 500) {
+                dataBuffer.delete(0, dataBuffer.length() - 100); // Mantener los últimos 100 caracteres
+            }
         }
     }
 
