@@ -200,7 +200,7 @@ public class ForegroundService extends Service {
         lastParity = paridad;
         lastBitData = bitDato;
         lastStopBit = bitParada;
-        lastCommand=comando;
+        lastCommand = comando;
 
         if (isPortOpen()) {
             closeUsbConnection();
@@ -209,61 +209,59 @@ public class ForegroundService extends Service {
         UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
         UsbDevice device = null;
 
-        //if (usbSerialPort != null) {
-            // Obtener el dispositivo USB
-            for (UsbDevice v : usbManager.getDeviceList().values()) {
-                device = v;
-                break;  // Usa el primer dispositivo USB encontrado
-            }
+        for (UsbDevice v : usbManager.getDeviceList().values()) {
+            device = v;
+            break;  // Usa el primer dispositivo USB encontrado
+        }
 
-            if (device == null) {
-                Log.e(TAG, "No USB device found");
-                return;
-            }
+        if (device == null) {
+            Log.e(TAG, "No USB device found");
+            return;
+        }
 
-            UsbSerialDriver driver = UsbSerialProber.getDefaultProber().probeDevice(device);
-            if (driver == null || driver.getPorts().isEmpty()) {
-                Log.e(TAG, "No USB driver or ports found for the device");
-                return;
-            }
+        UsbSerialDriver driver = UsbSerialProber.getDefaultProber().probeDevice(device);
+        if (driver == null || driver.getPorts().isEmpty()) {
+            Log.e(TAG, "No USB driver or ports found for the device");
+            return;
+        }
 
-            usbSerialPort = driver.getPorts().get(0);
-            UsbDeviceConnection usbConnection = usbManager.openDevice(driver.getDevice());
-            if (usbConnection == null) {
-                Log.e(TAG, "Opening USB connection failed");
-                return;
-            }
+        usbSerialPort = driver.getPorts().get(0);
+        UsbDeviceConnection usbConnection = usbManager.openDevice(driver.getDevice());
+        if (usbConnection == null) {
+            Log.e(TAG, "Opening USB connection failed");
+            return;
+        }
 
-            try {
-                usbSerialPort.open(usbConnection);
-                int parity = paridad.equals("N") ? UsbSerialPort.PARITY_NONE : paridad.equals("E") ? UsbSerialPort.PARITY_EVEN : UsbSerialPort.PARITY_ODD;
-                //usbSerialPort.setParameters(baudRate, bitDato, bitParada, parity);
+        try {
+            usbSerialPort.open(usbConnection);
+            int parity = paridad.equals("N") ? UsbSerialPort.PARITY_NONE : paridad.equals("E") ? UsbSerialPort.PARITY_EVEN : UsbSerialPort.PARITY_ODD;
+            usbSerialPort.setParameters(baudRate, bitDato, bitParada, parity);
+            if (!isPortOpen()) {
+                Log.e(TAG, "USB port is not open. Attempting to reconnect...");
+                ensureConnection(puerto, baudRate, paridad, bitDato, bitParada, comando);
                 if (!isPortOpen()) {
-                    Log.e(TAG, "USB port is not open. Attempting to reconnect...");
-                    ensureConnection(puerto, baudRate, paridad, bitDato, bitParada, comando);
-                    if (!isPortOpen()) {
-                        Log.e(TAG, "Failed to reopen USB port.");
-                        return;
-                    }
+                    Log.e(TAG, "Failed to reopen USB port.");
+                    return;
                 }
-            } catch (IOException e) {
-                Log.e(TAG, "Error setting up USB connection", e);
-                return;
             }
+        } catch (IOException e) {
+            Log.e(TAG, "Error setting up USB connection", e);
+            return;
+        }
 
-            try {
-                JSONArray comandoArray = new JSONArray(comando);
-                String comandoFormateado = comandoArray.getString(0);
-                Log.d("COMMAND", "FORMATEADO: " + comandoFormateado);
-                startReadingUsbData(comandoFormateado);
-                //startReadingUsbData("R");
-            } catch (JSONException e) {
-                Log.e(TAG, "Error parsing JSON command", e);
-                // Handle error appropriately, e.g., return or set a default command
-                startReadingUsbData("$");
-            }
-        //}
-        //startReadingUsbData("$");
+        synchronized (dataBuffer) {
+            dataBuffer.setLength(0);  // Limpiar el buffer antes de una nueva lectura
+        }
+
+        try {
+            JSONArray comandoArray = new JSONArray(comando);
+            String comandoFormateado = comandoArray.getString(0);
+            Log.d("COMMAND", "FORMATEADO: " + comandoFormateado);
+            startReadingUsbData(comandoFormateado);
+        } catch (JSONException e) {
+            Log.e(TAG, "Error parsing JSON command", e);
+            startReadingUsbData("$");
+        }
     }
 
     private final Object weightLock = new Object();
@@ -410,12 +408,21 @@ public class ForegroundService extends Service {
             try {
                 float weight = Float.parseFloat(matchedData);
                 Log.d("BUFFER", "Processed weight data: " + weight);
-                synchronized (dataBuffer) {
-                    receivedData = String.format(Locale.US, "%.2f", weight);
-                    dataBuffer.delete(0, matcher.end());
+
+                // Validar el peso para asegurarnos de que es un valor razonable
+                if (isWeightValid(weight)) {
+                    synchronized (dataBuffer) {
+                        receivedData = String.format(Locale.US, "%.2f", weight);
+                        dataBuffer.delete(0, matcher.end());
+                    }
+                    setWeightReady();  // Notify that weight is ready
+                    return;  // Salir del método una vez que se haya procesado un dato válido
+                } else {
+                    Log.e(TAG, "Invalid weight value: " + weight);
+                    synchronized (dataBuffer) {
+                        dataBuffer.delete(0, matcher.end());  // Eliminar los datos inválidos del buffer
+                    }
                 }
-                setWeightReady();  // Notify that weight is ready
-                return;  // Salir del método una vez que se haya procesado un dato válido
             } catch (NumberFormatException e) {
                 Log.e(TAG, "Error parsing number: " + matchedData, e);
                 synchronized (dataBuffer) {
@@ -426,14 +433,14 @@ public class ForegroundService extends Service {
 
         if (dataBuffer.length() > 40) {
             synchronized (dataBuffer) {
-                dataBuffer.delete(0, dataBuffer.length() - 20); // Mantener los últimos 100 caracteres
+                dataBuffer.delete(0, dataBuffer.length() - 20); // Mantener los últimos 20 caracteres
             }
         }
     }
 
     private boolean isWeightValid(float weight) {
         // Implementa lógica específica para validar el peso, por ejemplo:
-        return weight < 100000;  // Suponiendo que los pesos deberían estar entre 0 y 500 kg
+        return weight > -100000 && weight < 100000;  // Suponiendo que los pesos deberían estar entre -100000 y 100000
     }
 
     public String obtenerDatosDeBascula() {
@@ -596,7 +603,7 @@ public class ForegroundService extends Service {
 
                     String data;
                     try {
-                        data = waitForWeight(10000);  // Espera hasta 5 segundos para que el peso esté listo
+                        data = waitForWeight(10000);  // Espera hasta 10 segundos para que el peso esté listo
                     } catch (InterruptedException e) {
                         Log.e(TAG, "Interrupted while waiting for weight", e);
                         sendResponse(outputStream, 500, "Internal Server Error", "text/plain");
