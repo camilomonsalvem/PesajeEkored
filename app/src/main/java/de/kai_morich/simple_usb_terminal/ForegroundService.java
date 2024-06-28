@@ -194,6 +194,7 @@ public class ForegroundService extends Service {
 
     private void connectUsb(String puerto, int baudRate, String paridad, int bitDato, int bitParada, String comando) {
         // Guardar los últimos parámetros de conexión
+        Log.d("BUFFER", "ConnectUsb: ");
         lastPort = puerto;
         lastBaudRate = baudRate;
         lastParity = paridad;
@@ -254,8 +255,8 @@ public class ForegroundService extends Service {
                 JSONArray comandoArray = new JSONArray(comando);
                 String comandoFormateado = comandoArray.getString(0);
                 Log.d("COMMAND", "FORMATEADO: " + comandoFormateado);
-                //startReadingUsbData(comandoFormateado);
-                startReadingUsbData("R");
+                startReadingUsbData(comandoFormateado);
+                //startReadingUsbData("R");
             } catch (JSONException e) {
                 Log.e(TAG, "Error parsing JSON command", e);
                 // Handle error appropriately, e.g., return or set a default command
@@ -263,6 +264,30 @@ public class ForegroundService extends Service {
             }
         //}
         //startReadingUsbData("$");
+    }
+
+    private final Object weightLock = new Object();
+    private boolean weightReady = false;
+
+    private void setWeightReady() {
+        synchronized (weightLock) {
+            weightReady = true;
+            weightLock.notifyAll();
+        }
+    }
+
+    public String waitForWeight(long timeout) throws InterruptedException {
+        synchronized (weightLock) {
+            long startTime = System.currentTimeMillis();
+            while (!weightReady && (System.currentTimeMillis() - startTime) < timeout) {
+                weightLock.wait(timeout);
+            }
+            if (!weightReady) {
+                throw new InterruptedException("Timeout waiting for weight");
+            }
+            weightReady = false;  // Reset for the next read
+            return obtenerDatosDeBascula();
+        }
     }
 
     private void ensureConnection(String puerto, int baudRate, String paridad, int bitDato, int bitParada, String comando) {
@@ -300,6 +325,7 @@ public class ForegroundService extends Service {
     private Thread readingThread;
 
     private void startReadingUsbData(String command) {
+        Log.d("BUFFER", "StartReadingUsbData");
         readingThread = new Thread(() -> {
             byte[] buffer = new byte[1028];
             synchronized (usbLock) {
@@ -316,7 +342,7 @@ public class ForegroundService extends Service {
                             synchronized (dataBuffer) {
                                 dataBuffer.append(data);
                             }
-                            processBuffer(command);
+                            processBuffer();
                         }
                     }
                 } catch (IOException e) {
@@ -365,40 +391,42 @@ public class ForegroundService extends Service {
     }
     */
 
-    private void processBuffer(String command) {
+    private void processBuffer() {
         String completeData;
         synchronized (dataBuffer) {
             completeData = dataBuffer.toString();
         }
-        Log.d(TAG, "Complete data: " + completeData);
+        Log.d("BUFFER", "Complete data:" + completeData);
 
         // Buscar todos los números que pueden incluir un punto decimal
         Pattern pattern = Pattern.compile("-?\\d+\\.\\d+");
         Matcher matcher = pattern.matcher(completeData);
 
-        if (matcher.find()) {
+        while (matcher.find()) {
             String matchedData = matcher.group();
-            Log.d(TAG, "Matched data: " + matchedData);
+            Log.d("BUFFER", "Matched data: " + matchedData);
 
             // Convertir a número y hacer validaciones adicionales si es necesario
             try {
                 float weight = Float.parseFloat(matchedData);
-                receivedData = String.format(Locale.US, "%.2f", weight);
-                Log.d(TAG, "Processed weight data: " + receivedData);
-
-                // Limpiar el buffer hasta el final del dato procesado para evitar procesarlo de nuevo
+                Log.d("BUFFER", "Processed weight data: " + weight);
                 synchronized (dataBuffer) {
+                    receivedData = String.format(Locale.US, "%.2f", weight);
                     dataBuffer.delete(0, matcher.end());
                 }
+                setWeightReady();  // Notify that weight is ready
+                return;  // Salir del método una vez que se haya procesado un dato válido
             } catch (NumberFormatException e) {
                 Log.e(TAG, "Error parsing number: " + matchedData, e);
-            }
-        } else {
-            // Si no se encontró un número válido, limpiar el buffer si se acumula demasiado
-            synchronized (dataBuffer) {
-                if (dataBuffer.length() > 500) {
-                    dataBuffer.delete(0, dataBuffer.length() - 100); // Mantener los últimos 100 caracteres
+                synchronized (dataBuffer) {
+                    dataBuffer.delete(0, matcher.end());  // Eliminar los datos inválidos del buffer
                 }
+            }
+        }
+
+        if (dataBuffer.length() > 40) {
+            synchronized (dataBuffer) {
+                dataBuffer.delete(0, dataBuffer.length() - 20); // Mantener los últimos 100 caracteres
             }
         }
     }
@@ -413,10 +441,12 @@ public class ForegroundService extends Service {
         synchronized (dataBuffer) {
             data = receivedData;
         }
+        Log.d("BUFFER", "data after synchronized: " + data);
         if (data.isEmpty()) {
             return "0.0";
         }
         String formattedData = data.replaceFirst("^0+(?!$)", "");
+        Log.d("BUFFER", "formattedData: " + formattedData);
         if (formattedData.startsWith(".")) {
             formattedData = "0" + formattedData;
         }
@@ -553,7 +583,7 @@ public class ForegroundService extends Service {
                     sendResponse(outputStream, 200, jsonResponse.toString(), "application/json");
                 } else if ("leer-peso".equals(endpoint)) {
                     Map<String, String> queryParams = getQueryParameters(path);
-
+                    Log.d("BUFFER", "leer-peso called");
                     String puerto = queryParams.get("puerto");
                     int baudRate = Integer.parseInt(getOrDefault(queryParams, "baudRate", "9600"));
                     String paridad = getOrDefault(queryParams, "paridad", "N");
@@ -563,9 +593,19 @@ public class ForegroundService extends Service {
 
                     Log.d("COMMAND", "Comando: " + comando);
                     connectUsb(puerto, baudRate, paridad, bitDato, bitParada, comando);
-                    String data = obtenerDatosDeBascula();
+
+                    String data;
+                    try {
+                        data = waitForWeight(10000);  // Espera hasta 5 segundos para que el peso esté listo
+                    } catch (InterruptedException e) {
+                        Log.e(TAG, "Interrupted while waiting for weight", e);
+                        sendResponse(outputStream, 500, "Internal Server Error", "text/plain");
+                        return;
+                    }
+
                     JSONObject jsonResponse = new JSONObject();
                     try {
+                        Log.d("BUFFER", "send Data response: " + data);
                         jsonResponse.put("weight", data);
                     } catch (JSONException e) {
                         Log.e(TAG, "Error creating JSON response", e);
@@ -622,8 +662,6 @@ public class ForegroundService extends Service {
             return map.containsKey(key) ? map.get(key) : defaultValue;
         }
     }
-
-
 
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
         @Override
