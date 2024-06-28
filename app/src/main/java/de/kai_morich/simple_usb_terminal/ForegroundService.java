@@ -87,7 +87,6 @@ public class ForegroundService extends Service {
         });
         // Add more commands and patterns as needed
     }
-
      */
 
     @Override
@@ -235,7 +234,7 @@ public class ForegroundService extends Service {
         try {
             usbSerialPort.open(usbConnection);
             int parity = paridad.equals("N") ? UsbSerialPort.PARITY_NONE : paridad.equals("E") ? UsbSerialPort.PARITY_EVEN : UsbSerialPort.PARITY_ODD;
-            usbSerialPort.setParameters(baudRate, bitDato, bitParada, parity);
+            usbSerialPort.setParameters(baudRate, bitDato, bitParada, parity);  // Asegurarse de que estos parámetros sean óptimos
             if (!isPortOpen()) {
                 Log.e(TAG, "USB port is not open. Attempting to reconnect...");
                 ensureConnection(puerto, baudRate, paridad, bitDato, bitParada, comando);
@@ -278,7 +277,7 @@ public class ForegroundService extends Service {
         synchronized (weightLock) {
             long startTime = System.currentTimeMillis();
             while (!weightReady && (System.currentTimeMillis() - startTime) < timeout) {
-                weightLock.wait(timeout);
+                weightLock.wait(100);  // Reducir el tiempo de espera para verificar más frecuentemente
             }
             if (!weightReady) {
                 throw new InterruptedException("Timeout waiting for weight");
@@ -325,7 +324,7 @@ public class ForegroundService extends Service {
     private void startReadingUsbData(String command) {
         Log.d("BUFFER", "StartReadingUsbData");
         readingThread = new Thread(() -> {
-            byte[] buffer = new byte[1028];
+            byte[] buffer = new byte[64];  // Reducir el tamaño del buffer de lectura
             synchronized (usbLock) {
                 if (!isPortOpen()) {
                     Log.e(TAG, "USB port is not open");
@@ -396,7 +395,7 @@ public class ForegroundService extends Service {
         }
         Log.d("BUFFER", "Complete data:" + completeData);
 
-        // Buscar todos los números que pueden incluir un punto decimal
+        // Usar una expresión regular optimizada para buscar números
         Pattern pattern = Pattern.compile("-?\\d+\\.\\d+");
         Matcher matcher = pattern.matcher(completeData);
 
@@ -408,29 +407,23 @@ public class ForegroundService extends Service {
             try {
                 float weight = Float.parseFloat(matchedData);
                 Log.d("BUFFER", "Processed weight data: " + weight);
-
-                // Validar el peso para asegurarnos de que es un valor razonable
-                if (isWeightValid(weight)) {
-                    synchronized (dataBuffer) {
-                        receivedData = String.format(Locale.US, "%.2f", weight);
-                        dataBuffer.delete(0, matcher.end());
-                    }
-                    setWeightReady();  // Notify that weight is ready
-                    return;  // Salir del método una vez que se haya procesado un dato válido
-                } else {
-                    Log.e(TAG, "Invalid weight value: " + weight);
-                    synchronized (dataBuffer) {
-                        dataBuffer.delete(0, matcher.end());  // Eliminar los datos inválidos del buffer
-                    }
+                synchronized (dataBuffer) {
+                    receivedData = String.format(Locale.US, "%.2f", weight);
+                    // Eliminar los datos procesados del buffer
+                    dataBuffer.delete(0, matcher.end());
                 }
+                setWeightReady();  // Notificar que el peso está listo
+                return;  // Salir del método una vez que se haya procesado un dato válido
             } catch (NumberFormatException e) {
                 Log.e(TAG, "Error parsing number: " + matchedData, e);
                 synchronized (dataBuffer) {
-                    dataBuffer.delete(0, matcher.end());  // Eliminar los datos inválidos del buffer
+                    // Eliminar los datos inválidos del buffer
+                    dataBuffer.delete(0, matcher.end());
                 }
             }
         }
 
+        // Mantener el buffer manejable eliminando datos antiguos
         if (dataBuffer.length() > 40) {
             synchronized (dataBuffer) {
                 dataBuffer.delete(0, dataBuffer.length() - 20); // Mantener los últimos 20 caracteres
